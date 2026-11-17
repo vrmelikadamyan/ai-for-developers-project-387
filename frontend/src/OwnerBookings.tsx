@@ -44,6 +44,9 @@ export function OwnerBookings() {
                     <div className="agenda-guest">
                       <strong>{booking.guestName}</strong>
                       <span>{booking.guestEmail}</span>
+                      {booking.guestTopic && (
+                        <span className="guest-topic">Тема разговора: {booking.guestTopic}</span>
+                      )}
                       <small>Дата создания: {formatDay(booking.createdAt)}</small>
                     </div>
                   </li>
