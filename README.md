@@ -35,6 +35,14 @@ Workflow слушает только `issues.opened`. Для ботов, вне�
 
 Проверка на `master` подтвердила оба сценария. Обычное обращение [#14](https://github.com/vrmelikadamyan/ai-for-developers-project-387/issues/14) получило разбор без команды `/oc`: [комментарий](https://github.com/vrmelikadamyan/ai-for-developers-project-387/issues/14#issuecomment-6953748872) и [прогон](https://github.com/vrmelikadamyan/ai-for-developers-project-387/actions/runs/44123366167). Тикет [#15](https://github.com/vrmelikadamyan/ai-for-developers-project-387/issues/15) с меткой `ready-for-agent` был пропущен до запуска модели, задание завершилось со статусом `skipped`: [прогон](https://github.com/vrmelikadamyan/ai-for-developers-project-387/actions/runs/44123366535).
 
+### Проверка pull request
+
+Для PR доверенного участника или OpenCode из этого репозитория [проверка PR](.github/workflows/pr-review-request.yml) запускает [независимое ревью](.github/workflows/pr-review.yml). Ревьюер читает diff, [критерии календаря](REVIEW.md), связанные issues, согласование и доступные результаты CI. Замечания и проверенный SHA появляются в обсуждении PR. Автор передаёт подтверждённое замечание командой `/oc` в обсуждении или у строки diff. После нового push ревью повторяется.
+
+На один PR выделены две попытки интерактивной правки, общие для обоих видов комментариев. Повтор запуска через **Re-run** также расходует попытку. При остановке отчёт «нужен человек» содержит SHA и ссылку на журнал. `limit_exhausted` означает исчерпанный бюджет, `timeout` — истёкший лимит времени, `infra` — сбой подготовки, `agent_failed` — ошибку агента.
+
+[Браузерная проверка PR](.github/workflows/pr-browser.yml) поднимает календарь из точного head SHA и сохраняет `booking-browser-<SHA>` в артефактах Actions. В `result.json` указаны ожидаемый и фактический SHA и результат. Трассировки гостя и владельца содержат снимки экрана. Перед слиянием откройте артефакт последнего коммита, проверьте вывод CI и заполните [шаблон PR](.github/pull_request_template.md). Ветка `master` требует успешный `check`.
+
 ## Docker и деплой
 
 Из корня репозитория соберите образ и запустите его на выбранном порту:
