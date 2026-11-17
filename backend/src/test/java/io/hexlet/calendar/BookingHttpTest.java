@@ -2,6 +2,7 @@ package io.hexlet.calendar;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.sql.DriverManager;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -10,6 +11,7 @@ import java.util.UUID;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.client.RestTestClient;
@@ -22,9 +24,23 @@ class BookingHttpTest extends CalendarHttpTest {
 
   private RestTestClient.ResponseSpec book(
       RestTestClient http, UUID type, String at, String name, String email) {
-    return post(
-        http,
-        Map.of("meetingTypeId", type, "startsAt", at, "guestName", name, "guestEmail", email));
+    return book(http, type, at, name, email, null);
+  }
+
+  private RestTestClient.ResponseSpec book(
+      RestTestClient http,
+      UUID type,
+      String at,
+      String name,
+      String email,
+      @Nullable String guestTopic) {
+    var body = new HashMap<String, Object>();
+    body.put("meetingTypeId", type);
+    body.put("startsAt", at);
+    body.put("guestName", name);
+    body.put("guestEmail", email);
+    if (guestTopic != null) body.put("guestTopic", guestTopic);
+    return post(http, body);
   }
 
   private RestTestClient.ResponseSpec post(RestTestClient http, Object body) {
@@ -85,6 +101,108 @@ class BookingHttpTest extends CalendarHttpTest {
       assertThat(getList(http, "/api/meeting-types")).isEqualTo(types);
       assertThat(getList(http, UPCOMING)).containsExactly(booking);
       assertOccupiedCalendars(http, halfHour, longer);
+    }
+  }
+
+  @Test
+  void guestTopicIsOptionalTrimmedAndReturnedOnlyWhenPresent() {
+    try (var app = start()) {
+      var http = http(app);
+      var type = publish(http, 30);
+      var topic = "Обсудить проект";
+      var booking =
+          JSON.readTree(
+              book(
+                      http,
+                      type,
+                      "2026-11-11T06:00:00Z",
+                      "Анна",
+                      "anna@example.org",
+                      "  " + topic + "  ")
+                  .expectStatus()
+                  .isCreated()
+                  .expectBody()
+                  .jsonPath("$.guestTopic")
+                  .isEqualTo(topic)
+                  .returnResult()
+                  .getResponseBody());
+      book(http, type, "2026-11-11T06:30:00Z", "Лев", "lev@example.org", null)
+          .expectStatus()
+          .isCreated()
+          .expectBody()
+          .jsonPath("$.guestTopic")
+          .doesNotExist();
+      book(http, type, "2026-11-11T07:00:00Z", "Ия", "iya@example.org", "   ")
+          .expectStatus()
+          .isCreated()
+          .expectBody()
+          .jsonPath("$.guestTopic")
+          .doesNotExist();
+      var explicitNull = new HashMap<String, Object>();
+      explicitNull.put("meetingTypeId", type);
+      explicitNull.put("startsAt", "2026-11-11T07:30:00Z");
+      explicitNull.put("guestName", "Пётр");
+      explicitNull.put("guestEmail", "petr@example.org");
+      explicitNull.put("guestTopic", null);
+      post(http, explicitNull)
+          .expectStatus()
+          .isCreated()
+          .expectBody()
+          .jsonPath("$.guestTopic")
+          .doesNotExist();
+      var upcoming = getList(http, UPCOMING);
+      assertThat(upcoming).hasSize(4);
+      assertThat(upcoming.getFirst()).isEqualTo(booking);
+      assertThat(upcoming.subList(1, upcoming.size()))
+          .allSatisfy(entry -> assertThat(entry.has("guestTopic")).isFalse());
+    }
+  }
+
+  @Test
+  void guestTopicAllowsOneThousandUnicodeCodePointsAndRejectsOneMore() {
+    try (var app = start()) {
+      var http = http(app);
+      var type = publish(http, 30);
+      var maximum = "😀".repeat(1000);
+      book(http, type, "2026-11-11T06:00:00Z", "Анна", "anna@example.org", " " + maximum + " ")
+          .expectStatus()
+          .isCreated()
+          .expectBody()
+          .jsonPath("$.guestTopic")
+          .isEqualTo(maximum);
+      assertInvalidField(
+          book(http, type, "2026-11-11T06:30:00Z", "Лев", "lev@example.org", "😀".repeat(1001)),
+          "guestTopic");
+      assertThat(getList(http, UPCOMING)).hasSize(1);
+    }
+  }
+
+  @Test
+  void existingBookingWithoutGuestTopicSurvivesSchemaMigration() throws Exception {
+    String id;
+    try (var app = start()) {
+      var http = http(app);
+      var type = publish(http, 30);
+      id =
+          Objects.requireNonNull(
+                  book(http, type, "2026-11-11T06:30:00Z", "Анна", "anna@example.org", null)
+                      .expectStatus()
+                      .isCreated()
+                      .expectBody(JsonNode.class)
+                      .returnResult()
+                      .getResponseBody())
+              .get("id")
+              .asString();
+    }
+    try (var connection =
+        DriverManager.getConnection("jdbc:h2:file:" + directory.resolve("calendar"), "", "")) {
+      connection.createStatement().execute("ALTER TABLE bookings DROP COLUMN guest_topic");
+    }
+    try (var app = start()) {
+      var upcoming = getList(http(app), UPCOMING);
+      assertThat(upcoming).hasSize(1);
+      assertThat(upcoming.getFirst().get("id").asString()).isEqualTo(id);
+      assertThat(upcoming.getFirst().has("guestTopic")).isFalse();
     }
   }
 
@@ -371,6 +489,8 @@ class BookingHttpTest extends CalendarHttpTest {
         .jsonPath("$[*].guestName")
         .isEmpty()
         .jsonPath("$[*].guestEmail")
+        .isEmpty()
+        .jsonPath("$[*].guestTopic")
         .isEmpty();
   }
 }

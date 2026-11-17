@@ -25,7 +25,8 @@ public class OwnerBookingsController implements OwnerBookingsApi {
         db.sql(
                 """
                 SELECT b.id, b.meeting_type_id, t.name AS meeting_type_name,
-                       b.guest_name, b.guest_email, b.starts_at, b.ends_at, b.created_at
+                       b.guest_name, b.guest_email, b.guest_topic,
+                       b.starts_at, b.ends_at, b.created_at
                 FROM bookings b JOIN meeting_types t ON t.id = b.meeting_type_id
                 WHERE b.starts_at > ?
                 ORDER BY b.starts_at

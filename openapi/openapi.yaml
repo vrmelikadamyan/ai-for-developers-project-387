@@ -336,6 +336,10 @@ components:
           type: string
           maxLength: 254
           format: email
+        guestTopic:
+          type: string
+          maxLength: 1000
+          description: Trim surrounding whitespace, then allow up to 1000 Unicode code points; blank means absent.
         id:
           $ref: '#/components/schemas/Id'
         meetingTypeName:
@@ -368,6 +372,9 @@ components:
         guestEmail:
           type: string
           description: Trim surrounding whitespace, then require an email of at most 254 Unicode code points.
+        guestTopic:
+          type: string
+          description: Trim surrounding whitespace, then allow up to 1000 Unicode code points; blank means absent.
     CalendarDay:
       type: object
       required:
