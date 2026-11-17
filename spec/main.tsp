@@ -135,7 +135,7 @@ model BookingInput {
   guestEmail: string;
 
   /** Trim surrounding whitespace, then allow up to 1000 Unicode code points; blank means absent. */
-  guestTopic?: string;
+  guestTopic?: string | null;
 }
 
 model Booking {

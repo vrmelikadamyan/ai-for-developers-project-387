@@ -27,6 +27,15 @@ class BookingHttpTest extends CalendarHttpTest {
     return book(http, type, at, name, email, null);
   }
 
+  private Map<String, Object> bookingBody(UUID type, String at, String name, String email) {
+    var body = new HashMap<String, Object>();
+    body.put("meetingTypeId", type);
+    body.put("startsAt", at);
+    body.put("guestName", name);
+    body.put("guestEmail", email);
+    return body;
+  }
+
   private RestTestClient.ResponseSpec book(
       RestTestClient http,
       UUID type,
@@ -34,11 +43,7 @@ class BookingHttpTest extends CalendarHttpTest {
       String name,
       String email,
       @Nullable String guestTopic) {
-    var body = new HashMap<String, Object>();
-    body.put("meetingTypeId", type);
-    body.put("startsAt", at);
-    body.put("guestName", name);
-    body.put("guestEmail", email);
+    var body = bookingBody(type, at, name, email);
     if (guestTopic != null) body.put("guestTopic", guestTopic);
     return post(http, body);
   }
@@ -138,11 +143,7 @@ class BookingHttpTest extends CalendarHttpTest {
           .expectBody()
           .jsonPath("$.guestTopic")
           .doesNotExist();
-      var explicitNull = new HashMap<String, Object>();
-      explicitNull.put("meetingTypeId", type);
-      explicitNull.put("startsAt", "2026-11-11T07:30:00Z");
-      explicitNull.put("guestName", "Пётр");
-      explicitNull.put("guestEmail", "petr@example.org");
+      var explicitNull = bookingBody(type, "2026-11-11T07:30:00Z", "Пётр", "petr@example.org");
       explicitNull.put("guestTopic", null);
       post(http, explicitNull)
           .expectStatus()
@@ -179,30 +180,25 @@ class BookingHttpTest extends CalendarHttpTest {
 
   @Test
   void existingBookingWithoutGuestTopicSurvivesSchemaMigration() throws Exception {
-    String id;
+    JsonNode booking;
     try (var app = start()) {
       var http = http(app);
       var type = publish(http, 30);
-      id =
+      booking =
           Objects.requireNonNull(
-                  book(http, type, "2026-11-11T06:30:00Z", "Анна", "anna@example.org", null)
-                      .expectStatus()
-                      .isCreated()
-                      .expectBody(JsonNode.class)
-                      .returnResult()
-                      .getResponseBody())
-              .get("id")
-              .asString();
+              book(http, type, "2026-11-11T06:30:00Z", "Анна", "anna@example.org", null)
+                  .expectStatus()
+                  .isCreated()
+                  .expectBody(JsonNode.class)
+                  .returnResult()
+                  .getResponseBody());
     }
     try (var connection =
         DriverManager.getConnection("jdbc:h2:file:" + directory.resolve("calendar"), "", "")) {
       connection.createStatement().execute("ALTER TABLE bookings DROP COLUMN guest_topic");
     }
     try (var app = start()) {
-      var upcoming = getList(http(app), UPCOMING);
-      assertThat(upcoming).hasSize(1);
-      assertThat(upcoming.getFirst().get("id").asString()).isEqualTo(id);
-      assertThat(upcoming.getFirst().has("guestTopic")).isFalse();
+      assertThat(getList(http(app), UPCOMING)).containsExactly(booking);
     }
   }
 

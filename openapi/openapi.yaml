@@ -374,6 +374,7 @@ components:
           description: Trim surrounding whitespace, then require an email of at most 254 Unicode code points.
         guestTopic:
           type: string
+          nullable: true
           description: Trim surrounding whitespace, then allow up to 1000 Unicode code points; blank means absent.
     CalendarDay:
       type: object
