@@ -33,6 +33,8 @@
 
 Workflow слушает только `issues.opened`. Для ботов, внешних авторов и тикетов, созданных с меткой `ready-for-agent`, GitHub показывает статус задания `skipped`. Если issue успели закрыть или пометить готовым во время ожидания, агент тоже пропустит его. Автотриаж и интерактивный OpenCode используют общую очередь для каждого issue. Лимит автотриажа — 10 минут. Для чтения репозитория и ответа в issue используются права `contents: read` и `issues: write` токена GitHub Actions. [Прогоны Issue triage](https://github.com/vrmelikadamyan/ai-for-developers-project-387/actions/workflows/issue-triage.yml)
 
+Проверка на `master` подтвердила оба сценария. Обычное обращение [#14](https://github.com/vrmelikadamyan/ai-for-developers-project-387/issues/14) получило разбор без команды `/oc`: [комментарий](https://github.com/vrmelikadamyan/ai-for-developers-project-387/issues/14#issuecomment-6953748872) и [прогон](https://github.com/vrmelikadamyan/ai-for-developers-project-387/actions/runs/44123366167). Тикет [#15](https://github.com/vrmelikadamyan/ai-for-developers-project-387/issues/15) с меткой `ready-for-agent` был пропущен до запуска модели, задание завершилось со статусом `skipped`: [прогон](https://github.com/vrmelikadamyan/ai-for-developers-project-387/actions/runs/44123366535).
+
 ## Docker и деплой
 
 Из корня репозитория соберите образ и запустите его на выбранном порту:
