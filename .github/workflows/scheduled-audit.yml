@@ -1,0 +1,143 @@
+name: Scheduled audit
+run-name: 'Calendar audit${{ inputs.source_run_id && format('' · replay {0}'', inputs.source_run_id) || '''' }}'
+
+on:
+  schedule:
+    - cron: '17 3 * * *' # daily, 03:17 UTC
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: 'Replay the Lighthouse artifact of a successful master audit (blank: collect a new report)'
+        required: false
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: scheduled-audit-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      issues: write
+      actions: read # validate and download only this workflow's own successful master report
+    env:
+      APP_URL: ${{ vars.APP_URL }}
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+      OPENCODE_TOOL: aqua:anomalyco/opencode@1.19.6
+    steps:
+      - name: Set the report directory outside the checkout
+        run: echo "REPORT_DIR=$RUNNER_TEMP/calendar-audit" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          install: false
+          cache: false
+
+      - name: Install report tools
+        run: mise install node pnpm python
+
+      - name: Replay a validated source report
+        if: inputs.source_run_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: mise exec -- python3 .github/scripts/scheduled_audit.py replay
+
+      - name: Wake the public calendar without changing its data
+        if: inputs.source_run_id == ''
+        run: |
+          test -n "$APP_URL"
+          health=$(mise exec -- python3 -c 'import os; from urllib.parse import urlsplit; u=urlsplit(os.environ["APP_URL"]); assert u.scheme == "https" and u.netloc; print(f"{u.scheme}://{u.netloc}/api/health")')
+          mise exec -- curl --fail --silent --show-error --retry 5 --retry-all-errors \
+            --retry-delay 15 --connect-timeout 10 --max-time 45 "$health"
+
+      - name: Collect Lighthouse JSON and HTML
+        if: inputs.source_run_id == ''
+        run: |
+          mkdir -p "$REPORT_DIR"
+          export CHROME_PATH
+          CHROME_PATH=$(command -v google-chrome)
+          mise exec -- pnpm dlx lighthouse@13.6.0 "$APP_URL" \
+            --output=json --output=html --output-path="$REPORT_DIR/lighthouse" \
+            --only-categories=performance,accessibility,best-practices,seo \
+            --chrome-flags='--headless --no-sandbox --disable-dev-shm-usage' --quiet
+
+      - name: Preserve the source report even if analysis fails
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lighthouse-report
+          path: |
+            ${{ runner.temp }}/calendar-audit/lighthouse.report.json
+            ${{ runner.temp }}/calendar-audit/lighthouse.report.html
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Normalize evidence and read existing issues in every state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: mise exec -- python3 .github/scripts/scheduled_audit.py prepare
+
+      - name: Install the pinned analysis CLI
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: mise install "$OPENCODE_TOOL"
+
+      - name: Analyze with OpenCode and DeepSeek
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          binary=$(mise which opencode --tool "$OPENCODE_TOOL")
+          result=false
+          # A CLI transport failure or an empty/invalid model response gets one fresh attempt.
+          for attempt in 1 2; do
+            scratch=$(mktemp -d "$RUNNER_TEMP/audit-model.XXXXXX")
+            if (
+              cd "$scratch"
+              timeout 240 env -i HOME="$HOME" PATH='/usr/local/bin:/usr/bin:/bin' \
+                XDG_CONFIG_HOME="$scratch/config" XDG_DATA_HOME="$scratch/data" \
+                DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
+                OPENCODE_CONFIG_CONTENT='{"permission":{"*":"deny"},"share":"disabled"}' \
+                "$binary" run --pure --model deepseek/deepseek-flash --format json \
+                < "$REPORT_DIR/prompt.txt" > "$REPORT_DIR/model-events-$attempt.jsonl" \
+                2> "$REPORT_DIR/model-stderr-$attempt.txt"
+            ) && mise exec -- python3 .github/scripts/scheduled_audit.py decision "$REPORT_DIR/model-events-$attempt.jsonl"; then
+              result=true
+              break
+            fi
+          done
+          "$result"
+
+      - name: Publish at most one finding and the durable journal entry
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: mise exec -- python3 .github/scripts/scheduled_audit.py publish
+
+      - name: Preserve model output and normalized evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: audit-analysis
+          path: |
+            ${{ runner.temp }}/calendar-audit/summary.json
+            ${{ runner.temp }}/calendar-audit/prompt.txt
+            ${{ runner.temp }}/calendar-audit/decision.json
+            ${{ runner.temp }}/calendar-audit/model-*
+            ${{ runner.temp }}/calendar-audit/publication.txt
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Record an unavailable audit in the durable journal
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: mise exec -- python3 .github/scripts/scheduled_audit.py failure
