@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.0 (2026-11-17)
+
+
+### Features
+
+* add an optional guest topic to bookings ([#7](https://github.com/vrmelikadamyan/ai-for-developers-project-387/issues/7)) ([35da986](https://github.com/vrmelikadamyan/ai-for-developers-project-387/commit/35da98614d3f1217d487ff2bb1bb20b999fb7367)), closes [#5](https://github.com/vrmelikadamyan/ai-for-developers-project-387/issues/5) [#8](https://github.com/vrmelikadamyan/ai-for-developers-project-387/issues/8) [#9](https://github.com/vrmelikadamyan/ai-for-developers-project-387/issues/9) [#10](https://github.com/vrmelikadamyan/ai-for-developers-project-387/issues/10) [#11](https://github.com/vrmelikadamyan/ai-for-developers-project-387/issues/11)
+
 ## [1.1.0](https://github.com/vrmelikadamyan/ai-for-developers-project-386/compare/v1.0.0...v1.1.0) (2026-11-17)
 
 
