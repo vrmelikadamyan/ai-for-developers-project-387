@@ -1,0 +1,81 @@
+name: PR browser verification
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-browser-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Verify the checked-out PR head
+        id: head
+        run: |
+          actual=$(git rev-parse --verify HEAD)
+          echo "sha=$actual" >> "$GITHUB_OUTPUT"
+          if [[ "$actual" != "$EXPECTED_HEAD" ]]; then
+            echo "::error::Expected $EXPECTED_HEAD but checked out $actual"
+            exit 1
+          fi
+
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          cache: false
+          github_token: ''
+
+      - name: Install dependencies and Chromium
+        run: |
+          mise exec -- pnpm install --frozen-lockfile
+          mise exec -- pnpm --filter frontend exec playwright install --with-deps --only-shell chromium
+
+      - name: Run the guest and owner booking scenario
+        id: verification
+        env:
+          CALENDAR_BROWSER_ARTIFACT_DIR: ${{ runner.temp }}/booking-browser
+        run: |
+          mise exec -- sh -ec 'cd backend && ./mvnw -B -q -Dtest=BookingBrowserTest test'
+          test -s "$CALENDAR_BROWSER_ARTIFACT_DIR/guest-trace.zip"
+          test -s "$CALENDAR_BROWSER_ARTIFACT_DIR/owner-trace.zip"
+
+      - name: Record the verification result
+        if: always()
+        env:
+          ACTUAL_HEAD: ${{ steps.head.outputs.sha }}
+          RESULT: ${{ job.status }}
+          BROWSER_RESULT: ${{ steps.verification.outcome }}
+        run: |
+          evidence="$RUNNER_TEMP/booking-browser"
+          mkdir -p "$evidence"
+          jq -n --arg expected "$EXPECTED_HEAD" --arg actual "$ACTUAL_HEAD" \
+            --arg result "$RESULT" --arg browser "$BROWSER_RESULT" \
+            '{expectedHeadSha: $expected, actualHeadSha: $actual, result: $result, browser: $browser}' \
+            > "$evidence/result.json"
+          {
+            printf '## Booking browser verification — %s\n\n' "$RESULT"
+            printf 'Expected PR head: %s\n\n' "$EXPECTED_HEAD"
+            printf 'Checked-out head: %s\n\n' "${ACTUAL_HEAD:-unavailable}"
+            printf 'BookingBrowserTest: **%s**\n' "$BROWSER_RESULT"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the result and Playwright traces
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: booking-browser-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/booking-browser/
+          if-no-files-found: error
