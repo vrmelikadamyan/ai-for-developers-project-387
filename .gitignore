@@ -1,0 +1,8 @@
+node_modules/
+.DS_Store
+.idea/
+*.iml
+.vscode/
+openapi-ts-error-*.log
+**/data/*.mv.db
+**/data/*.trace.db
