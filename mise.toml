@@ -101,7 +101,6 @@ run = ["pnpm --filter frontend run typecheck", "cd backend && ./mvnw -B -q compi
 description = "Tests (Vitest, JUnit and the Chromium booking scenario)"
 depends = ["api:generate"]
 run = [
-  "node --test .github/scripts/opencode-budget.test.mjs",
   "python3 -B -m unittest discover -s .github/scripts -p 'test_*.py'",
   "pnpm --filter frontend run test",
   "pnpm --filter frontend exec playwright install --only-shell chromium",

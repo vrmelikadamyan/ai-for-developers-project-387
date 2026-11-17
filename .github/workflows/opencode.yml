@@ -82,8 +82,7 @@ jobs:
         run: |
           decision=allowed
           if [[ "$REQUEST_TITLE" == "OpenCode PR #$NUMBER" ]]; then
-            decision=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/workflows/opencode.yml/runs?per_page=100" |
-              node .github/scripts/opencode-budget.mjs)
+            decision=$(python3 .github/scripts/opencode_budget.py)
           fi
           echo "decision=$decision" >> "$GITHUB_OUTPUT"
 
@@ -127,8 +126,8 @@ jobs:
     timeout-minutes: 5
     permissions:
       actions: read
-      issues: write
-      pull-requests: read
+      issues: write # report failures on issue requests
+      pull-requests: write # report failures on PR requests
     steps:
       - name: Publish the reason and attempt log
         env:
@@ -151,7 +150,7 @@ jobs:
               .jobs[] | select(.name == "Interactive OpenCode") |
               if .conclusion == "timed_out" then "timeout"
               elif any(.steps[]?; .name == "Run OpenCode" and .conclusion == "failure") then "agent_failed"
-              else "infra" end')
+              else "infra" end') || reason=infra
             reason=${reason:-infra}
           fi
           url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT"
