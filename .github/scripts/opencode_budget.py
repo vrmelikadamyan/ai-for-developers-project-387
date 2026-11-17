@@ -5,9 +5,14 @@ import os
 from urllib.request import Request, urlopen
 
 
+class UnstableHistory(ValueError):
+    """The pages did not form a complete snapshot of the workflow runs."""
+
+
 def workflow_runs(api, repo, token):
     url = f"{api}/repos/{repo}/actions/workflows/opencode.yml/runs"
     seen = set()
+    expected_count = None
     page = 1
     while True:
         request = Request(f"{url}?per_page=100&page={page}", headers={
@@ -15,15 +20,19 @@ def workflow_runs(api, repo, token):
         })
         with urlopen(request, timeout=30) as response:
             payload = json.load(response)
+        if expected_count is None:
+            expected_count = payload["total_count"]
+        elif expected_count != payload["total_count"]:
+            raise UnstableHistory("Actions history changed during pagination")
         runs = payload["workflow_runs"]
         for run in runs:
             if run["id"] in seen:
-                raise ValueError("Actions history changed during pagination")
+                raise UnstableHistory("Actions history changed during pagination")
             seen.add(run["id"])
             yield run
         if len(runs) < 100:
-            if len(seen) != payload["total_count"]:
-                raise ValueError("Actions history is incomplete")
+            if len(seen) != expected_count:
+                raise UnstableHistory("Actions history is incomplete")
             return
         page += 1
 
@@ -49,8 +58,16 @@ def budget_decision(runs, run_id, attempt, title, repo):
     return "allowed" if charged <= 2 else "limit_exhausted"
 
 
-if __name__ == "__main__":
+def check_current_attempt():
     repo = os.environ["GITHUB_REPOSITORY"]
     history = workflow_runs(os.environ["GITHUB_API_URL"], repo, os.environ["GH_TOKEN"])
-    print(budget_decision(history, int(os.environ["GITHUB_RUN_ID"]),
-                          int(os.environ["GITHUB_RUN_ATTEMPT"]), os.environ["REQUEST_TITLE"], repo))
+    return budget_decision(history, int(os.environ["GITHUB_RUN_ID"]),
+                           int(os.environ["GITHUB_RUN_ATTEMPT"]), os.environ["REQUEST_TITLE"], repo)
+
+
+if __name__ == "__main__":
+    try:
+        decision = check_current_attempt()
+    except UnstableHistory:
+        decision = check_current_attempt()
+    print(decision)

@@ -22,15 +22,21 @@ def run(run_id, status="completed", attempt=1, **fields):
 
 
 class BudgetCommand(unittest.TestCase):
-    def check_history(self, pages, run_id, attempt=1):
+    def check_history(self, snapshots, run_id, attempt=1):
+        snapshots = iter(snapshots)
+        pages = {}
+
         class Actions(BaseHTTPRequestHandler):
             def log_message(self, *args):
                 pass
 
             def do_GET(self):
+                nonlocal pages
                 if self.headers.get("Authorization") != "Bearer test-token":
                     self.send_error(401)
                     return
+                if self.path == RUNS_PATH + "1":
+                    pages = next(snapshots, {})
                 page = pages.get(self.path)
                 if page is None:
                     self.send_error(404)
@@ -57,14 +63,38 @@ class BudgetCommand(unittest.TestCase):
         failed = run(44132824083, conclusion="failure")
         current = run(44132825000, "in_progress", event="pull_request_review_comment", pull_requests=[])
         ignored = [run(i, display_title="Ignored OpenCode comment") for i in range(98)]
-        result = self.check_history({
+        result = self.check_history([{
             RUNS_PATH + "1": {"total_count": 101, "workflow_runs": [current, *ignored, failed]},
             RUNS_PATH + "2": {"total_count": 101, "workflow_runs": [run(44132700000, conclusion="cancelled")]},
-        }, current["id"])
+        }], current["id"])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "limit_exhausted")
 
-    def test_a_short_or_overlapping_history_cannot_authorize_an_attempt(self):
+    def test_one_new_read_can_recover_a_changing_history_without_charging_any_attempt_twice(self):
+        current = run(1, "in_progress")
+        previous = run(2, conclusion="failure")
+        unrelated = [run(i, display_title="Ignored OpenCode comment") for i in range(3, 101)]
+        first_page = {RUNS_PATH + "1": {"total_count": 101, "workflow_runs": [current, previous, *unrelated]}}
+        overlap = {**first_page, RUNS_PATH + "2": {"total_count": 101, "workflow_runs": [unrelated[-1]]}}
+        short = {RUNS_PATH + "1": {"total_count": 3, "workflow_runs": [current, previous]}}
+        stable = {**first_page, RUNS_PATH + "2": {"total_count": 101, "workflow_runs": [run(102, "queued")]}}
+        changed_total = {
+            RUNS_PATH + "1": {"total_count": 101, "workflow_runs": [current, previous, run(3), *unrelated[1:]]},
+            RUNS_PATH + "2": {"total_count": 100, "workflow_runs": []},
+        }
+        for interrupted in (overlap, short, changed_total):
+            result = self.check_history([interrupted, stable], current["id"])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), "allowed")
+
+    def test_a_complete_history_with_the_wrong_attempt_stops_immediately(self):
+        wrong_attempt = {RUNS_PATH + "1": {"total_count": 1, "workflow_runs": [run(1)]}}
+        fresh = {RUNS_PATH + "1": {"total_count": 1, "workflow_runs": [run(1, attempt=2)]}}
+        result = self.check_history([wrong_attempt, fresh], 1, attempt=2)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+
+    def test_a_persistently_short_or_overlapping_history_cannot_authorize_an_attempt(self):
         current = run(1, "in_progress")
         unrelated = [run(i, display_title="Ignored OpenCode comment") for i in range(2, 101)]
         histories = [
@@ -73,7 +103,9 @@ class BudgetCommand(unittest.TestCase):
              RUNS_PATH + "2": {"total_count": 101, "workflow_runs": [unrelated[-1]]}},
         ]
         for history in histories:
-            result = self.check_history(history, current["id"])
+            # A third read would allow this attempt, but only one repeat is permitted.
+            stable = {RUNS_PATH + "1": {"total_count": 1, "workflow_runs": [current]}}
+            result = self.check_history([history, history, stable], current["id"])
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(result.stdout, "")
 
