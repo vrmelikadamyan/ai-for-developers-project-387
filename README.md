@@ -25,7 +25,7 @@
 
 [Workflow OpenCode](.github/workflows/opencode.yml) обрабатывает события `issue_comment` и `pull_request_review_comment` только при создании комментария. Команды доступны доверенным участникам с правом записи. Комментарии ботов и PR из форков пропускаются. Модель `deepseek/deepseek-flash` получает ключ из секрета Actions `DEEPSEEK_API_KEY`. OpenCode отвечает от имени GitHub App в том же обсуждении. Журнал выполнения доступен в [Actions → OpenCode](https://github.com/vrmelikadamyan/ai-for-developers-project-387/actions/workflows/opencode.yml).
 
-Публичная ссылка на сессию отключена (`share: false`; используемая версия OpenCode уже прекратила публикацию сессий). Для одного issue или PR одновременно выполняется один запрос, до 15 минут. Остановить текущий запуск можно через **Cancel workflow**, отключить новые — через **Disable workflow**.
+Публичная ссылка на сессию отключена (`share: false`; используемая версия OpenCode уже прекратила публикацию сессий). Для одного issue или PR одновременно выполняется один запрос. На работу в issue отводится до 45 минут, на правку PR — до 15 минут. Остановить текущий запуск можно через **Cancel workflow**, отключить новые — через **Disable workflow**.
 
 ### Автотриаж новых обращений
 
