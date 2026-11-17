@@ -1,7 +1,15 @@
 name: OpenCode
+# Actions assigns the budget key from the original event. Neither editing a comment
+# nor the agent's response can change the request recorded in workflow history.
+run-name: >-
+  ${{ github.event.comment.user.type == 'User' &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&
+      (github.event.comment.body == '/oc' || startsWith(github.event.comment.body, '/oc ') ||
+       github.event.comment.body == '/opencode' || startsWith(github.event.comment.body, '/opencode ')) &&
+      format('OpenCode {0} #{1}', (github.event.issue.pull_request || github.event.pull_request) && 'PR' || 'issue',
+             github.event.issue.number || github.event.pull_request.number) || 'Ignored OpenCode comment' }}
 
 on:
-  # The job checks the commenter and PR origin before checkout or access to DeepSeek.
   # actionlint ignore=trigger "issue_comment" is dangerous
   issue_comment:
     types: [created]
@@ -10,57 +18,126 @@ on:
 
 permissions: {}
 
+# Serialize the whole attempt, including its reporter. Pending requests keep
+# their place; a retry of a failed model job must pass the budget step again.
+concurrency:
+  group: opencode-${{ github.repository }}-${{ github.event.issue.number || github.event.pull_request.number }}
+  queue: max
+
+env:
+  NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+
 jobs:
   opencode:
-    if: >-
-      github.event.comment.user.type == 'User' &&
-      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&
-      (github.event.comment.body == '/oc' || startsWith(github.event.comment.body, '/oc ') ||
-       github.event.comment.body == '/opencode' || startsWith(github.event.comment.body, '/opencode ')) &&
-      (github.event_name != 'pull_request_review_comment' || github.event.pull_request.head.repo.full_name == github.repository)
+    name: Interactive OpenCode
+    if: github.event.comment.user.type == 'User' && startsWith(github.event.comment.body, '/')
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: ${{ (github.event.issue.pull_request || github.event.pull_request) && 15 || 45 }}
     permissions:
+      actions: read
       contents: read
-      issues: write # gh publishes specs and tickets on a trusted /oc request
+      issues: write # gh publishes specs and tickets on trusted issue requests
       pull-requests: read
-      id-token: write
-    concurrency:
-      group: opencode-${{ github.repository }}-${{ github.event.issue.number || github.event.pull_request.number }}
-      cancel-in-progress: false
+      id-token: write # OpenCode App performs the git push and PR creation
+    outputs:
+      budget: ${{ steps.budget.outputs.decision }}
+    env:
+      OPENCODE_TOOL: aqua:anomalyco/opencode@1.19.6
 
     steps:
-      - name: Check the source repository for PR conversations
-        id: source
+      - name: Check the request and live PR origin
+        id: request
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if jq -e '.issue.pull_request' "$GITHUB_EVENT_PATH" >/dev/null; then
-            number=$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")
-            head_repo=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$number" --jq '.head.repo.full_name')
-            if [[ "$head_repo" != "$GITHUB_REPOSITORY" ]]; then
-              echo "Skipping a comment on a pull request from another repository."
-              exit 0
-            fi
-          fi
-          echo "allowed=true" >> "$GITHUB_OUTPUT"
+          title=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .display_title)
+          case "$title" in
+            "OpenCode issue #$NUMBER") ;;
+            "OpenCode PR #$NUMBER")
+              head_repo=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$NUMBER" --jq .head.repo.full_name)
+              [[ "$head_repo" == "$GITHUB_REPOSITORY" ]] || exit 0 ;;
+            *) exit 0 ;;
+          esac
+          echo "title=$title" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: steps.source.outputs.allowed == 'true'
+        if: steps.request.outputs.title != ''
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
+          fetch-depth: 0
+
+      - name: Check this attempt against the PR budget
+        id: budget
+        shell: bash
+        if: steps.request.outputs.title != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUEST_TITLE: ${{ steps.request.outputs.title }}
+        run: |
+          decision=allowed
+          if [[ "$REQUEST_TITLE" == "OpenCode PR #$NUMBER" ]]; then
+            decision=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/workflows/opencode.yml/runs?per_page=100" |
+              node .github/scripts/opencode-budget.mjs)
+          fi
+          echo "decision=$decision" >> "$GITHUB_OUTPUT"
 
       - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
-        if: steps.source.outputs.allowed == 'true'
+        if: steps.budget.outputs.decision == 'allowed'
 
-      - name: Run OpenCode with DeepSeek
-        if: steps.source.outputs.allowed == 'true'
-        uses: anomalyco/opencode/github@f4e363c8295fa90a03dddc451882fffe8fbce357 # v1.19.6
+      - name: Install pinned OpenCode
+        if: steps.budget.outputs.decision == 'allowed'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: mise install "$OPENCODE_TOOL"
+
+      - name: Run OpenCode
+        if: steps.budget.outputs.decision == 'allowed'
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           GH_TOKEN: ${{ github.token }}
-        with:
-          model: deepseek/deepseek-flash
-          mentions: '/oc,/opencode'
-          share: 'false'
+          MODEL: deepseek/deepseek-flash
+          MENTIONS: /oc,/opencode
+          OPENCODE_CONFIG_CONTENT: >-
+            {"permission":{"external_directory":{"*":"deny","/tmp":"allow","/tmp/*":"allow"}}}
+        run: mise exec "$OPENCODE_TOOL" -- opencode github run
+
+  report:
+    name: Report stopped request
+    needs: opencode
+    if: >-
+      always() && (needs.opencode.outputs.budget == 'limit_exhausted' ||
+                   needs.opencode.result == 'failure' || needs.opencode.result == 'cancelled')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      issues: write
+      pull-requests: read
+    steps:
+      - name: Publish the reason and attempt log
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUDGET: ${{ needs.opencode.outputs.budget }}
+        run: |
+          api="repos/$GITHUB_REPOSITORY"
+          run=$(gh api "$api/actions/runs/$GITHUB_RUN_ID")
+          title=$(jq -r .display_title <<< "$run")
+          case "$title" in
+            "OpenCode PR #$NUMBER")
+              head=$(gh api "$api/pulls/$NUMBER" --jq '.head | select(.repo.full_name == env.GITHUB_REPOSITORY) | .sha')
+              [[ -n "$head" ]] || exit 0 ;;
+            "OpenCode issue #$NUMBER") head=$(jq -r .head_sha <<< "$run") ;;
+            *) exit 0 ;;
+          esac
+          reason=$BUDGET
+          if [[ "$reason" != limit_exhausted ]]; then
+            reason=$(gh api "$api/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" --jq '
+              .jobs[] | select(.name == "Interactive OpenCode") |
+              if .conclusion == "timed_out" then "timeout"
+              elif any(.steps[]?; .name == "Run OpenCode" and .conclusion == "failure") then "agent_failed"
+              else "infra" end')
+            reason=${reason:-infra}
+          fi
+          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT"
+          gh api -X POST "$api/issues/$NUMBER/comments" -f body="OpenCode остановлен — \`$reason\`. Статус **нужен человек**. Head SHA \`$head\`. [Журнал запуска]($url)"
