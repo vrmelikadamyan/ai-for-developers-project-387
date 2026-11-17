@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+from tempfile import TemporaryDirectory
 from urllib.parse import urlsplit
 
 
@@ -17,11 +18,21 @@ def marker(url, audit_id):
     return f"<!-- calendar-audit-finding:{key} -->"
 
 
+def trusted_issue(item):
+    author = item.get("author") or {}
+    return author.get("is_bot") is True and author.get("login") == "app/github-actions"
+
+
+def trusted_comment(item):
+    user = item.get("user") or {}
+    return user.get("type") == "Bot" and user.get("login") == "github-actions[bot]"
+
+
 def publish(summary, decision, run_url, github):
     report_marker = f"<!-- calendar-audit-report:{summary['fingerprint']} -->"
-    if any(report_marker in item["body"] for item in github.comments()):
+    if any(trusted_comment(item) and report_marker in (item["body"] or "") for item in github.comments()):
         return "This report already has a durable journal entry; nothing published."
-    issues = github.issues()
+    issues = [item for item in github.issues() if trusted_issue(item)]
     # Recover a partial publish (issue created, journal write failed) before considering a new finding.
     existing_report = next((item for item in issues if report_marker in (item["body"] or "")), None)
     finding = decision["finding"]
@@ -95,6 +106,8 @@ def read_decision(events, summary):
         raise ValueError("Model must return a JSON object with summary and finding")
     if not 1 <= len(decision["summary"].strip()) <= 3000:
         raise ValueError("Model summary must have 1..3000 characters")
+    if "<!-- calendar-audit-" in decision["summary"]:
+        raise ValueError("Model summary contains a reserved audit marker")
     finding = decision["finding"]
     if finding is not None:
         if not isinstance(finding, dict):
@@ -104,11 +117,20 @@ def read_decision(events, summary):
         for key, limit in [("title", 200), ("problem", 2000), ("action", 2000), ("evidence", 2000)]:
             if not isinstance(finding.get(key), str) or not 1 <= len(finding[key].strip()) <= limit:
                 raise ValueError(f"Model finding {key} must have 1..{limit} characters")
+            if "<!-- calendar-audit-" in finding[key]:
+                raise ValueError(f"Model finding {key} contains a reserved audit marker")
     return decision
 
 
 def gh(*args):
     return subprocess.check_output(["gh", *args], text=True)
+
+
+def gh_with_body(body, *args):
+    with TemporaryDirectory(prefix="calendar-audit-") as directory:
+        path = Path(directory) / "body.md"
+        path.write_text(body, encoding="utf-8")
+        return gh(*args, "--body-file", str(path))
 
 
 class GitHub:
@@ -118,7 +140,7 @@ class GitHub:
     def issues(self):
         # Search both open and closed issues; fail closed if the bounded CLI query is exhausted.
         issues = json.loads(gh("issue", "list", "--repo", self.repo, "--state", "all", "--limit", "10000",
-                               "--json", "number,title,body,url,state"))
+                               "--json", "number,title,body,url,state,author"))
         if len(issues) == 10000:
             raise ValueError("Issue search limit reached; refusing an incomplete duplicate check")
         return issues
@@ -129,11 +151,11 @@ class GitHub:
         return [item for page in pages for item in page]
 
     def create_issue(self, title, body):
-        return gh("issue", "create", "--repo", self.repo, "--label", "needs-triage",
-                  "--title", title, "--body", body).strip()
+        return gh_with_body(body, "issue", "create", "--repo", self.repo, "--label", "needs-triage",
+                            "--title", title).strip()
 
     def comment(self, body):
-        gh("issue", "comment", "26", "--repo", self.repo, "--body", body)
+        gh_with_body(body, "issue", "comment", "26", "--repo", self.repo)
 
 
 PROMPT = """Ты — аудитор публичного календаря, OpenCode с DeepSeek. Прочитай весь JSON-отчёт ниже.
@@ -192,7 +214,8 @@ def main():
         issues = github.issues()
         keys = {marker(summary["url"], item["auditId"]) for item in summary["findings"]}
         # Matching permanent markers first, then recent titles to spot previously filed manual reports.
-        issues.sort(key=lambda issue: not any(key in (issue["body"] or "") for key in keys))
+        issues.sort(key=lambda issue: not (trusted_issue(issue) and
+                                          any(key in (issue["body"] or "") for key in keys)))
         summary["existingIssues"] = [
             {"number": issue["number"], "title": issue["title"][:200], "url": issue["url"],
              "state": issue["state"]} for issue in issues[:100]]
@@ -215,7 +238,7 @@ def main():
             output.write(f"{result}\n\n[Журнал #26]({os.environ['GITHUB_SERVER_URL']}/{repo}/issues/26)\n")
     elif command == "failure":
         failure_marker = f"<!-- calendar-audit-failure:{run_id} -->"
-        if not any(failure_marker in item["body"] for item in github.comments()):
+        if not any(trusted_comment(item) and failure_marker in (item["body"] or "") for item in github.comments()):
             github.comment(f"{failure_marker}\n\nАудит недоступен или не завершён. "
                            f"[Прогон и сохранённые артефакты]({run_url}).\n\n"
                            "Данных для вывода о дефекте недостаточно. "
