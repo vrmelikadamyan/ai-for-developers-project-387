@@ -756,6 +756,10 @@ svg {
   display: grid;
   font-size: 0.91rem;
 }
+.agenda-guest .guest-topic {
+  margin-top: 4px;
+  color: var(--muted);
+}
 .agenda-guest small {
   margin-top: 4px;
   color: var(--muted);

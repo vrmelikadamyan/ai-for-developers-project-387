@@ -2,6 +2,7 @@ package io.hexlet.calendar;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.sql.DriverManager;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -10,6 +11,7 @@ import java.util.UUID;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.client.RestTestClient;
@@ -22,9 +24,28 @@ class BookingHttpTest extends CalendarHttpTest {
 
   private RestTestClient.ResponseSpec book(
       RestTestClient http, UUID type, String at, String name, String email) {
-    return post(
-        http,
-        Map.of("meetingTypeId", type, "startsAt", at, "guestName", name, "guestEmail", email));
+    return book(http, type, at, name, email, null);
+  }
+
+  private Map<String, Object> bookingBody(UUID type, String at, String name, String email) {
+    var body = new HashMap<String, Object>();
+    body.put("meetingTypeId", type);
+    body.put("startsAt", at);
+    body.put("guestName", name);
+    body.put("guestEmail", email);
+    return body;
+  }
+
+  private RestTestClient.ResponseSpec book(
+      RestTestClient http,
+      UUID type,
+      String at,
+      String name,
+      String email,
+      @Nullable String guestTopic) {
+    var body = bookingBody(type, at, name, email);
+    if (guestTopic != null) body.put("guestTopic", guestTopic);
+    return post(http, body);
   }
 
   private RestTestClient.ResponseSpec post(RestTestClient http, Object body) {
@@ -85,6 +106,131 @@ class BookingHttpTest extends CalendarHttpTest {
       assertThat(getList(http, "/api/meeting-types")).isEqualTo(types);
       assertThat(getList(http, UPCOMING)).containsExactly(booking);
       assertOccupiedCalendars(http, halfHour, longer);
+    }
+  }
+
+  @Test
+  void guestTopicIsOptionalTrimmedAndReturnedOnlyWhenPresent() {
+    try (var app = start()) {
+      var http = http(app);
+      var type = publish(http, 30);
+      var topic = "Обсудить проект";
+      var booking =
+          JSON.readTree(
+              book(
+                      http,
+                      type,
+                      "2026-11-11T06:00:00Z",
+                      "Анна",
+                      "anna@example.org",
+                      "  " + topic + "  ")
+                  .expectStatus()
+                  .isCreated()
+                  .expectBody()
+                  .jsonPath("$.guestTopic")
+                  .isEqualTo(topic)
+                  .returnResult()
+                  .getResponseBody());
+      book(http, type, "2026-11-11T06:30:00Z", "Лев", "lev@example.org", null)
+          .expectStatus()
+          .isCreated()
+          .expectBody()
+          .jsonPath("$.guestTopic")
+          .doesNotHaveJsonPath();
+      book(http, type, "2026-11-11T07:00:00Z", "Ия", "iya@example.org", "   ")
+          .expectStatus()
+          .isCreated()
+          .expectBody()
+          .jsonPath("$.guestTopic")
+          .doesNotHaveJsonPath();
+      var explicitNull = bookingBody(type, "2026-11-11T07:30:00Z", "Пётр", "petr@example.org");
+      explicitNull.put("guestTopic", null);
+      post(http, explicitNull)
+          .expectStatus()
+          .isCreated()
+          .expectBody()
+          .jsonPath("$.guestTopic")
+          .doesNotHaveJsonPath();
+      var upcoming = getList(http, UPCOMING);
+      assertThat(upcoming).hasSize(4);
+      assertThat(upcoming.getFirst()).isEqualTo(booking);
+      assertThat(upcoming.subList(1, upcoming.size()))
+          .allSatisfy(entry -> assertThat(entry.has("guestTopic")).isFalse());
+    }
+  }
+
+  @Test
+  void guestTopicAllowsOneThousandUnicodeCodePointsAndRejectsOneMore() {
+    try (var app = start()) {
+      var http = http(app);
+      var type = publish(http, 30);
+      var maximum = "😀".repeat(1000);
+      book(http, type, "2026-11-11T06:00:00Z", "Анна", "anna@example.org", " " + maximum + " ")
+          .expectStatus()
+          .isCreated()
+          .expectBody()
+          .jsonPath("$.guestTopic")
+          .isEqualTo(maximum);
+      assertInvalidField(
+          book(http, type, "2026-11-11T06:30:00Z", "Лев", "lev@example.org", "😀".repeat(1001)),
+          "guestTopic");
+      assertThat(getList(http, UPCOMING)).hasSize(1);
+    }
+  }
+
+  @Test
+  void legacyBookingAndNewTopicSurviveSchemaMigration() throws Exception {
+    var topic = "Обсудить проект";
+    UUID type;
+    JsonNode legacy;
+    try (var app = start()) {
+      var http = http(app);
+      type = publish(http, 30);
+      legacy =
+          JSON.readTree(
+              book(http, type, "2026-11-11T06:30:00Z", "Анна", "anna@example.org", null)
+                  .expectStatus()
+                  .isCreated()
+                  .expectBody()
+                  .jsonPath("$.guestTopic")
+                  .doesNotHaveJsonPath()
+                  .returnResult()
+                  .getResponseBody());
+    }
+    try (var connection = DriverManager.getConnection(jdbcUrl(), "", "")) {
+      connection.createStatement().execute("ALTER TABLE bookings DROP COLUMN guest_topic");
+    }
+    JsonNode topicBooking;
+    try (var app = start()) {
+      var http = http(app);
+      var upcoming = getList(http, UPCOMING);
+      assertThat(upcoming).containsExactly(legacy);
+      assertThat(upcoming.getFirst().get("id")).isEqualTo(legacy.get("id"));
+      assertThat(upcoming.getFirst().has("guestTopic")).isFalse();
+      topicBooking =
+          JSON.readTree(
+              book(
+                      http,
+                      type,
+                      "2026-11-11T07:00:00Z",
+                      "Лев",
+                      "lev@example.org",
+                      "  " + topic + "  ")
+                  .expectStatus()
+                  .isCreated()
+                  .expectBody()
+                  .jsonPath("$.guestTopic")
+                  .isEqualTo(topic)
+                  .returnResult()
+                  .getResponseBody());
+    }
+    try (var app = start()) {
+      var upcoming = getList(http(app), UPCOMING);
+      assertThat(upcoming).containsExactly(legacy, topicBooking);
+      assertThat(upcoming.get(0).get("id")).isEqualTo(legacy.get("id"));
+      assertThat(upcoming.get(0).has("guestTopic")).isFalse();
+      assertThat(upcoming.get(1).get("id")).isEqualTo(topicBooking.get("id"));
+      assertThat(upcoming.get(1).get("guestTopic").asString()).isEqualTo(topic);
     }
   }
 
@@ -371,6 +517,8 @@ class BookingHttpTest extends CalendarHttpTest {
         .jsonPath("$[*].guestName")
         .isEmpty()
         .jsonPath("$[*].guestEmail")
+        .isEmpty()
+        .jsonPath("$[*].guestTopic")
         .isEmpty();
   }
 }

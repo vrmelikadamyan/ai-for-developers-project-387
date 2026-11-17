@@ -81,6 +81,42 @@ test('владелец публикует тип, затем гость види
   expect(screen.getByText('30 мин')).toBeDefined()
 })
 
+test('владелец видит тему разговора только у записей с темой', async () => {
+  vi.stubGlobal('fetch', async (request: Request) => {
+    const path = new URL(request.url).pathname
+    if (path === '/api/meeting-types') return Response.json([])
+    if (path !== '/api/owner/bookings/upcoming') throw new Error('Unknown path')
+    return Response.json([
+      {
+        id: '3264314b-1a11-45d8-9ab2-a8aeab146faa',
+        meetingTypeId: 'da9ec1d5-7c72-4a3e-b791-e2183672b928',
+        meetingTypeName: 'Знакомство',
+        startsAt: '2026-11-11T06:30:00Z',
+        endsAt: '2026-11-11T07:00:00Z',
+        createdAt: '2026-11-09T22:00:00Z',
+        guestName: 'Анна-Мария Ли',
+        guestEmail: 'anna+work@example.org',
+        guestTopic: 'Обсудить проект',
+      },
+      {
+        id: '8a54a1d2-2e8b-4d5e-9c6f-7a8b9c0d1e2f',
+        meetingTypeId: 'da9ec1d5-7c72-4a3e-b791-e2183672b928',
+        meetingTypeName: 'Знакомство',
+        startsAt: '2026-11-11T07:00:00Z',
+        endsAt: '2026-11-11T07:30:00Z',
+        createdAt: '2026-11-09T22:05:00Z',
+        guestName: 'Лев',
+        guestEmail: 'lev@example.org',
+      },
+    ])
+  })
+  openPage('/owner/bookings/upcoming')
+  const bookings = await screen.findAllByRole('listitem')
+  expect(bookings).toHaveLength(2)
+  expect(bookings[0].textContent).toContain('Тема разговора: Обсудить проект')
+  expect(bookings[1].textContent).not.toContain('Тема разговора')
+})
+
 test('форма проверяет границы после удаления пробелов и позволяет исправить поля', async () => {
   vi.stubGlobal('fetch', async (request: Request) =>
     request.method === 'POST'

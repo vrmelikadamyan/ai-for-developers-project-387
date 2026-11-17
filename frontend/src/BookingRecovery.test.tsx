@@ -107,12 +107,15 @@ test('при конфликте гость видит обновлённые с�
       if (
         input.startsAt === laterSlot.startsAt &&
         input.guestName === 'Анна' &&
-        input.guestEmail === 'anna@example.org'
+        input.guestEmail === 'anna@example.org' &&
+        input.guestTopic === 'Обсудить проект'
       )
-        return Response.json({}, { status: 201 })
+        return Response.json({ guestTopic: input.guestTopic }, { status: 201 })
       throw new Error('Некорректная повторная запись')
     },
   })
+  const topic = () => screen.getByRole<HTMLTextAreaElement>('textbox', { name: /Тема разговора/ })
+  fireEvent.change(topic(), { target: { value: ' Обсудить проект ' } })
   confirm()
   expect(await screen.findByText('Это время уже занято. Выберите другой слот')).toBeDefined()
   expect(screen.getByRole('heading', { name: meetingType.name })).toBeDefined()
@@ -127,8 +130,39 @@ test('при конфликте гость видит обновлённые с�
   fireEvent.click(screen.getByRole('button', { name: 'Продолжить' }))
   expect(name().value).toBe('Анна')
   expect(email().value).toBe('anna@example.org')
+  expect(topic().value).toBe(' Обсудить проект ')
   confirm()
   expect(await screen.findByText('Бронь подтверждена. До встречи!')).toBeDefined()
+  expect(screen.getByText('Тема разговора: Обсудить проект')).toBeDefined()
+})
+
+test('гость исправляет тему по ошибке сервера и подтверждает тот же слот', async () => {
+  let attempt = 0
+  const submissions: BookingInput[] = []
+  await openConfirmation({
+    book(input) {
+      submissions.push(input)
+      if (attempt++ === 0)
+        return Response.json(
+          { code: 'INVALID_INPUT', field: 'guestTopic', message: 'Уточните тему' },
+          { status: 400 },
+        )
+      return Response.json({ guestTopic: input.guestTopic }, { status: 201 })
+    },
+  })
+  const topic = () => screen.getByRole<HTMLTextAreaElement>('textbox', { name: /Тема разговора/ })
+  fireEvent.change(topic(), { target: { value: ' Первая тема ' } })
+  confirm()
+  const invalidField = await screen.findByRole('textbox', { description: /Уточните тему/ })
+  expect(invalidField).toBe(topic())
+  expect(invalidField.getAttribute('aria-invalid')).toBe('true')
+  expect(topic().value).toBe(' Первая тема ')
+  expect(screen.getByText(/11 ноября.*09:30–10:00 МСК/)).toBeDefined()
+  fireEvent.change(topic(), { target: { value: ' Исправленная тема ' } })
+  confirm()
+  expect(await screen.findByText('Бронь подтверждена. До встречи!')).toBeDefined()
+  expect(screen.getByText('Тема разговора: Исправленная тема')).toBeDefined()
+  expect(submissions[1].guestTopic).toBe('Исправленная тема')
 })
 
 test.each([
@@ -161,11 +195,15 @@ test.each([
         if (
           input.startsAt === freshSlot.startsAt &&
           input.guestName === 'Анна' &&
-          input.guestEmail === 'anna@example.org'
+          input.guestEmail === 'anna@example.org' &&
+          input.guestTopic === 'Обсудить проект'
         )
-          return Response.json({}, { status: 201 })
+          return Response.json({ guestTopic: input.guestTopic }, { status: 201 })
         throw new Error('Некорректная повторная запись')
       },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: /Тема разговора/ }), {
+      target: { value: ' Обсудить проект ' },
     })
     confirm()
     expect(await screen.findByText('Это время уже недоступно')).toBeDefined()
@@ -189,8 +227,12 @@ test.each([
     fireEvent.click(screen.getByRole('button', { name: 'Продолжить' }))
     expect(name().value).toBe('Анна')
     expect(email().value).toBe('anna@example.org')
+    expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: /Тема разговора/ }).value).toBe(
+      ' Обсудить проект ',
+    )
     confirm()
     expect(await screen.findByText('Бронь подтверждена. До встречи!')).toBeDefined()
+    expect(screen.getByText('Тема разговора: Обсудить проект')).toBeDefined()
   },
 )
 

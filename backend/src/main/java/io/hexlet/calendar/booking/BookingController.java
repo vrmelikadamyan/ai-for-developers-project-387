@@ -10,6 +10,7 @@ import java.time.Clock;
 import java.time.ZoneOffset;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -40,6 +41,8 @@ public class BookingController implements BookingsApi {
     var email = InvalidInput.text(input.getGuestEmail(), "guestEmail", 1, 254);
     if (!EMAIL.matcher(email).matches())
       throw new InvalidInput("guestEmail", "Введите корректный email");
+    var normalizedTopic = InvalidInput.text(input.getGuestTopic(), "guestTopic", 0, 1000);
+    @Nullable String guestTopic = normalizedTopic.isEmpty() ? null : normalizedTopic;
     var id = input.getMeetingTypeId();
     if (id == null) throw new InvalidInput("meetingTypeId", "Выберите тип встречи");
     if (input.getStartsAt() == null) throw new InvalidInput("startsAt", "Выберите время");
@@ -63,13 +66,22 @@ public class BookingController implements BookingsApi {
             .single();
     if (overlaps) throw new SlotTaken();
     var created = now.atOffset(ZoneOffset.UTC);
-    var booking = new Booking(id, start, name, email, UUID.randomUUID(), type.name(), end, created);
+    var booking =
+        new Booking(id, start, name, email, UUID.randomUUID(), type.name(), end, created)
+            .guestTopic(guestTopic);
     db.sql(
             """
-            INSERT INTO bookings (id, meeting_type_id, starts_at, ends_at, guest_name, guest_email, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO bookings (id, meeting_type_id, starts_at, ends_at, guest_name, guest_email, guest_topic, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """)
-        .params(booking.getId(), id, start, end, name, email, created)
+        .param(booking.getId())
+        .param(id)
+        .param(start)
+        .param(end)
+        .param(name)
+        .param(email)
+        .param(guestTopic)
+        .param(created)
         .update();
     return ResponseEntity.status(HttpStatus.CREATED).body(booking);
   }

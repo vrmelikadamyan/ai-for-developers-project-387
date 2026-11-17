@@ -16,12 +16,12 @@ import org.springframework.test.web.servlet.client.RestTestClient;
 abstract class CalendarHttpTest {
   @TempDir Path directory;
 
+  String jdbcUrl() {
+    return "jdbc:h2:file:" + directory.resolve("calendar");
+  }
+
   ConfigurableApplicationContext start(String... properties) {
-    var args =
-        new ArrayList<>(
-            List.of(
-                "--server.port=0",
-                "--spring.datasource.url=jdbc:h2:file:" + directory.resolve("calendar")));
+    var args = new ArrayList<>(List.of("--server.port=0", "--spring.datasource.url=" + jdbcUrl()));
     args.addAll(List.of(properties));
     return new SpringApplicationBuilder(CalendarApplication.class, FixedClockConfiguration.class)
         .run(args.toArray(String[]::new));

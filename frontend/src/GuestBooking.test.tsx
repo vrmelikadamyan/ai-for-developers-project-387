@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 
 import App from './App'
+import { type BookingInput } from './api'
 
 const type = { id: '3be6d035-b7bd-4ab7-964d-004ffea00e07', name: 'Знакомство', durationMinutes: 30 }
 
@@ -160,7 +161,8 @@ test('гость подтверждает запись и начинает но�
         contact.meetingTypeId === type.id &&
         contact.startsAt === startsAt &&
         contact.guestName === 'Анна-Мария Ли' &&
-        contact.guestEmail === 'anna+work@example.org'
+        contact.guestEmail === 'anna+work@example.org' &&
+        contact.guestTopic === 'Обсудить проект'
       ) {
         confirmed = true
         return Response.json(
@@ -188,8 +190,12 @@ test('гость подтверждает запись и начинает но�
   fireEvent.change(screen.getByRole('textbox', { name: /Email/i }), {
     target: { value: ' anna+work@example.org  ' },
   })
+  fireEvent.change(screen.getByRole('textbox', { name: /Тема разговора/ }), {
+    target: { value: ' Обсудить проект  ' },
+  })
   fireEvent.click(screen.getByRole('button', { name: 'Подтвердить запись' }))
   expect(await screen.findByText('Бронь подтверждена. До встречи!')).toBeDefined()
+  expect(screen.getByText('Тема разговора: Обсудить проект')).toBeDefined()
   fireEvent.click(screen.getByRole('button', { name: 'Забронировать ещё' }))
   fireEvent.click(await screen.findByRole('button', { name: type.name }))
   fireEvent.click(await screen.findByRole('button', { name: /11 ноября.*17/ }))
@@ -201,6 +207,9 @@ test('гость подтверждает запись и начинает но�
   fireEvent.click(screen.getByRole('button', { name: 'Продолжить' }))
   expect(screen.getByRole<HTMLInputElement>('textbox', { name: /Имя/ }).value).toBe('')
   expect(screen.getByRole<HTMLInputElement>('textbox', { name: /Email/i }).value).toBe('')
+  expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: /Тема разговора/ }).value).toBe(
+    '',
+  )
 })
 
 test('форма проверяет имя и email, сохраняет выбранный слот и позволяет исправить контакты', async () => {
@@ -259,12 +268,70 @@ test('форма проверяет имя и email, сохраняет выбр
   fireEvent.change(email, { target: { value: ' ' + validEmail + ' ' } })
   fireEvent.click(confirm)
   expect(await screen.findByText('Бронь подтверждена. До встречи!')).toBeDefined()
+  expect(screen.queryByText(/Тема разговора:/)).toBeNull()
   expect(submissions).toEqual([
     {
       meetingTypeId: type.id,
       startsAt: '2026-11-11T06:30:00Z',
       guestName: validName,
       guestEmail: validEmail,
+    },
+  ])
+})
+
+test('тема разговора необязательна, обрезается и ограничена 1000 символами Unicode', async () => {
+  const startsAt = '2026-11-11T06:30:00Z'
+  const submissions: BookingInput[] = []
+  vi.stubGlobal('fetch', async (request: Request) => {
+    const { pathname } = new URL(request.url)
+    if (pathname === '/api/meeting-types') return Response.json([type])
+    if (pathname.endsWith('/availability'))
+      return Response.json([{ date: '2026-11-11', freeCount: 1 }])
+    if (pathname.endsWith('/slots'))
+      return Response.json([{ startsAt, endsAt: '2026-11-11T07:00:00Z', status: 'available' }])
+    if (request.method === 'POST' && pathname === '/api/bookings') {
+      const input = (await request.json()) as BookingInput
+      submissions.push(input)
+      return Response.json(
+        {
+          ...input,
+          meetingTypeName: type.name,
+          endsAt: '2026-11-11T07:00:00Z',
+          createdAt: '2026-11-10T07:00:00Z',
+        },
+        { status: 201 },
+      )
+    }
+    throw new Error('Некорректный запрос')
+  })
+  openBooking()
+  fireEvent.click(await screen.findByRole('button', { name: type.name }))
+  fireEvent.click(await screen.findByRole('button', { name: /11 ноября/ }))
+  fireEvent.click(await screen.findByRole('button', { name: /09:30–10:00 МСК/ }))
+  fireEvent.click(screen.getByRole('button', { name: 'Продолжить' }))
+  expect(screen.getByText('Список предстоящих событий открыт всем')).toBeDefined()
+  const topic = screen.getByRole<HTMLTextAreaElement>('textbox', { name: /Тема разговора/ })
+  fireEvent.change(topic, { target: { value: '😀'.repeat(1001) } })
+  fireEvent.change(screen.getByRole('textbox', { name: /Имя/ }), {
+    target: { value: 'Анна' },
+  })
+  fireEvent.change(screen.getByRole('textbox', { name: /Email/ }), {
+    target: { value: 'anna@example.org' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Подтвердить запись' }))
+  expect(topic.getAttribute('aria-invalid')).toBe('true')
+  expect(screen.getByText('Тема разговора должна содержать до 1000 символов')).toBeDefined()
+  expect(submissions).toHaveLength(0)
+  fireEvent.change(topic, { target: { value: '  ' + '😀'.repeat(1000) + '  ' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Подтвердить запись' }))
+  expect(await screen.findByText('Бронь подтверждена. До встречи!')).toBeDefined()
+  expect(submissions).toEqual([
+    {
+      meetingTypeId: type.id,
+      startsAt,
+      guestName: 'Анна',
+      guestEmail: 'anna@example.org',
+      guestTopic: '😀'.repeat(1000),
     },
   ])
 })

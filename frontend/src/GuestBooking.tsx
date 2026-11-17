@@ -1,21 +1,23 @@
 import { ArrowLeft, CalendarCheck2, Check, Clock3 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
-import { type MeetingType, type Slot } from './api'
+import { type Booking, type MeetingType, type Slot } from './api'
 import { BookingCalendar } from './BookingCalendar'
-import { BookingForm } from './BookingForm'
+import { BookingForm, type GuestDetails } from './BookingForm'
 import { formatDay, formatSlot } from './bookingTime'
 import { MeetingTypeList } from './MeetingTypeList'
 
 const steps = ['Тип встречи', 'Дата и время', 'Контакты']
 
+const emptyDetails: GuestDetails = { guestName: '', guestEmail: '', guestTopic: '' }
+
 export function GuestBooking() {
   const [type, setType] = useState<MeetingType | null>(null)
   const [date, setDate] = useState<string | null>(null)
   const [slot, setSlot] = useState<Slot | null>(null)
-  const [contact, setContact] = useState({ guestName: '', guestEmail: '' })
+  const [contact, setContact] = useState<GuestDetails>(emptyDetails)
   const [notice, setNotice] = useState('')
-  const [confirmed, setConfirmed] = useState(false)
+  const [confirmed, setConfirmed] = useState<Booking | null>(null)
   const step = confirmed ? 3 : slot ? 2 : type ? 1 : 0
   const stageTitle = useRef<HTMLHeadingElement>(null)
   const previousStep = useRef(step)
@@ -53,16 +55,17 @@ export function GuestBooking() {
           <div className="receipt">
             <strong>{type.name}</strong>
             <p>{when}</p>
+            {confirmed.guestTopic && <p>Тема разговора: {confirmed.guestTopic}</p>}
           </div>
           <button
             className="action primary"
             onClick={() => {
-              setConfirmed(false)
+              setConfirmed(null)
               setType(null)
               setDate(null)
               setSlot(null)
               setNotice('')
-              setContact({ guestName: '', guestEmail: '' })
+              setContact(emptyDetails)
             }}
           >
             Забронировать ещё
@@ -102,7 +105,7 @@ export function GuestBooking() {
             <BookingForm
               typeId={type.id}
               startsAt={slot.startsAt}
-              onConfirmed={() => setConfirmed(true)}
+              onConfirmed={setConfirmed}
               contact={contact}
               onContactChange={setContact}
               onBack={(message = '') => {

@@ -12,9 +12,12 @@ CREATE TABLE IF NOT EXISTS bookings (
   ends_at TIMESTAMP WITH TIME ZONE NOT NULL,
   guest_name VARCHAR NOT NULL,
   guest_email VARCHAR NOT NULL,
+  guest_topic VARCHAR,
   created_at TIMESTAMP(9) WITH TIME ZONE NOT NULL,
   CHECK (ends_at > starts_at)
 );
+
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS guest_topic VARCHAR;
 
 CREATE INDEX IF NOT EXISTS bookings_starts_at ON bookings(starts_at);
 

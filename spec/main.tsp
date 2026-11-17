@@ -133,6 +133,9 @@ model BookingInput {
 
   /** Trim surrounding whitespace, then require an email of at most 254 Unicode code points. */
   guestEmail: string;
+
+  /** Trim surrounding whitespace, then allow up to 1000 Unicode code points; blank means absent. */
+  guestTopic?: string | null;
 }
 
 model Booking {
@@ -146,6 +149,10 @@ model Booking {
   @format("email")
   @maxLength(254)
   guestEmail: string;
+
+  /** Trim surrounding whitespace, then allow up to 1000 Unicode code points; blank means absent. */
+  @maxLength(1000)
+  guestTopic?: string;
 
   id: Id;
   meetingTypeName: MeetingType.name;

@@ -15,6 +15,10 @@ export type Booking = {
     startsAt: string;
     guestName: string;
     guestEmail: string;
+    /**
+     * Trim surrounding whitespace, then allow up to 1000 Unicode code points; blank means absent.
+     */
+    guestTopic?: string;
     id: Id;
     meetingTypeName: string;
     endsAt: string;
@@ -35,6 +39,10 @@ export type BookingInput = {
      * Trim surrounding whitespace, then require an email of at most 254 Unicode code points.
      */
     guestEmail: string;
+    /**
+     * Trim surrounding whitespace, then allow up to 1000 Unicode code points; blank means absent.
+     */
+    guestTopic?: string | null;
 };
 
 export type CalendarDay = {
