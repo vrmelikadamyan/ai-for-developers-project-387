@@ -1,0 +1,70 @@
+name: Issue triage
+run-name: 'Triage issue #${{ github.event.issue.number }}'
+
+on:
+  issues:
+    types: [opened]
+
+permissions: {}
+
+jobs:
+  triage:
+    if: >-
+      github.event.issue.user.type == 'User' &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.issue.author_association) &&
+      !contains(github.event.issue.labels.*.name, 'ready-for-agent')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: opencode-${{ github.repository }}-${{ github.event.issue.number }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      issues: write
+    env:
+      OPENCODE_TOOL: aqua:anomalyco/opencode@1.19.6
+
+    steps:
+      # A queued or retried issue may already have been prepared or closed.
+      - name: Check current issue state
+        id: issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          eligible=$(gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER" \
+            --jq '.state == "open" and all(.labels[]; (.name | ascii_downcase) != "ready-for-agent")')
+          echo "eligible=$eligible" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.issue.outputs.eligible == 'true'
+        with:
+          persist-credentials: false
+
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        if: steps.issue.outputs.eligible == 'true'
+
+      - name: Install OpenCode
+        if: steps.issue.outputs.eligible == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: mise install "$OPENCODE_TOOL"
+
+      - name: Triage with OpenCode and DeepSeek
+        if: steps.issue.outputs.eligible == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          USE_GITHUB_TOKEN: 'true'
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          MODEL: deepseek/deepseek-flash
+          OPENCODE_CONFIG_CONTENT: >-
+            {"permission":{"*":"deny","read":"allow","glob":"allow","grep":"allow","skill":{"triage":"allow"},"external_directory":"deny"}}
+          PROMPT: |
+            Проведи предварительный разбор открытого обращения по проектному скиллу triage.
+            Прочитай .agents/skills/triage/SKILL.md и docs/agents/triage-labels.md.
+            Сверь потребность пользователя с текущим кодом календаря. Укажи, где проверено
+            существующее поведение. Предложи категорию и метку состояния, объясни следующий
+            шаг. Если условий не хватает, задай автору конкретные вопросы.
+            Верни один короткий комментарий на русском с пометкой скилла об авторстве ИИ.
+            На этом предварительный разбор завершён. Решение о реализации принимает владелец.
+        run: mise exec "$OPENCODE_TOOL" -- opencode github run
