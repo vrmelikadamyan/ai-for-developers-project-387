@@ -25,7 +25,7 @@
 
 [Workflow OpenCode](.github/workflows/opencode.yml) обрабатывает события `issue_comment` и `pull_request_review_comment` только при создании комментария. Команды доступны доверенным участникам с правом записи. Комментарии ботов и PR из форков пропускаются. Модель `deepseek/deepseek-flash` получает ключ из секрета Actions `DEEPSEEK_API_KEY`. OpenCode отвечает от имени GitHub App в том же обсуждении. Журнал выполнения доступен в [Actions → OpenCode](https://github.com/vrmelikadamyan/ai-for-developers-project-387/actions/workflows/opencode.yml).
 
-Публичная ссылка на сессию отключена (`share: false`; используемая версия OpenCode уже прекратила публикацию сессий). Для одного issue или PR одновременно выполняется один запрос, до 15 минут. Остановить текущий запуск можно через **Cancel workflow**, отключить новые — через **Disable workflow**.
+Публичная ссылка на сессию отключена (`share: false`; используемая версия OpenCode уже прекратила публикацию сессий). Для одного issue или PR одновременно выполняется один запрос. На работу в issue отводится до 45 минут, на правку PR — до 15 минут. Остановить текущий запуск можно через **Cancel workflow**, отключить новые — через **Disable workflow**.
 
 ### Автотриаж новых обращений
 
@@ -34,6 +34,14 @@
 Workflow слушает только `issues.opened`. Для ботов, внешних авторов и тикетов, созданных с меткой `ready-for-agent`, GitHub показывает статус задания `skipped`. Если issue успели закрыть или пометить готовым во время ожидания, агент тоже пропустит его. Автотриаж и интерактивный OpenCode используют общую очередь для каждого issue. Лимит автотриажа — 10 минут. Для чтения репозитория и ответа в issue используются права `contents: read` и `issues: write` токена GitHub Actions. [Прогоны Issue triage](https://github.com/vrmelikadamyan/ai-for-developers-project-387/actions/workflows/issue-triage.yml)
 
 Проверка на `master` подтвердила оба сценария. Обычное обращение [#14](https://github.com/vrmelikadamyan/ai-for-developers-project-387/issues/14) получило разбор без команды `/oc`: [комментарий](https://github.com/vrmelikadamyan/ai-for-developers-project-387/issues/14#issuecomment-6953748872) и [прогон](https://github.com/vrmelikadamyan/ai-for-developers-project-387/actions/runs/44123366167). Тикет [#15](https://github.com/vrmelikadamyan/ai-for-developers-project-387/issues/15) с меткой `ready-for-agent` был пропущен до запуска модели, задание завершилось со статусом `skipped`: [прогон](https://github.com/vrmelikadamyan/ai-for-developers-project-387/actions/runs/44123366535).
+
+### Проверка pull request
+
+Для PR доверенного участника или OpenCode из этого репозитория [проверка PR](.github/workflows/pr-review-request.yml) запускает [независимое ревью](.github/workflows/pr-review.yml). Ревьюер читает diff, [критерии календаря](REVIEW.md), связанные issues, согласование и доступные результаты CI. Замечания и проверенный SHA появляются в обсуждении PR. Автор передаёт подтверждённое замечание командой `/oc` в обсуждении или у строки diff. После нового push ревью повторяется.
+
+На один PR выделены две попытки интерактивной правки, общие для обоих видов комментариев. Повтор запуска через **Re-run** также расходует попытку. Счётчик использует историю запусков Actions и номера попыток. У OpenCode App есть право читать историю; менять workflow может владелец или участник с соответствующим доступом. Перед вызовом в PR с правками самого workflow нужно проверить эти изменения. Удаление истории администратором меняет расчёт. При остановке отчёт «нужен человек» содержит SHA и ссылку на журнал. `limit_exhausted` означает исчерпанный бюджет, `timeout` — истёкший лимит времени, `infra` — сбой подготовки, `agent_failed` — ошибку агента.
+
+[Браузерная проверка PR](.github/workflows/pr-browser.yml) поднимает календарь из точного head SHA и сохраняет `booking-browser-<SHA>` в артефактах Actions. В `result.json` указаны ожидаемый и фактический SHA и результат. Трассировки гостя и владельца содержат снимки экрана. Перед слиянием откройте артефакт последнего коммита, проверьте вывод CI и заполните [шаблон PR](.github/pull_request_template.md). Ветка `master` требует успешный `check`.
 
 ## Docker и деплой
 

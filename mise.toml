@@ -3,6 +3,7 @@
 experimental = true # required for [daemons]
 
 [tools]
+python = "3.13.18"
 node = "24.22.2"
 pnpm = "12.18.0"
 java = "temurin-25.0.5+8.0.LTS"
@@ -88,7 +89,7 @@ run = [
   "pnpm --filter frontend run lint",
   "pnpm --filter frontend run format:check",
   "cd backend && ./mvnw -B -q spotless:check",
-  "jactionlint .github/workflows/ci.yml .github/workflows/release-please.yml .github/workflows/opencode.yml .github/workflows/issue-triage.yml",
+  "jactionlint .github/workflows/ci.yml .github/workflows/release-please.yml .github/workflows/opencode.yml .github/workflows/issue-triage.yml .github/workflows/pr-browser.yml .github/workflows/pr-review-request.yml .github/workflows/pr-review.yml",
 ]
 
 [tasks.typecheck]
@@ -100,6 +101,8 @@ run = ["pnpm --filter frontend run typecheck", "cd backend && ./mvnw -B -q compi
 description = "Tests (Vitest, JUnit and the Chromium booking scenario)"
 depends = ["api:generate"]
 run = [
+  "node --test .github/scripts/opencode-budget.test.mjs",
+  "python3 -B -m unittest discover -s .github/scripts -p 'test_*.py'",
   "pnpm --filter frontend run test",
   "pnpm --filter frontend exec playwright install --only-shell chromium",
   "cd backend && ./mvnw -B -q test",

@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import assert from 'node:assert/strict'
+import { mkdir } from 'node:fs/promises'
+import { join } from 'node:path'
 import test from 'node:test'
 import { chromium, expect } from '@playwright/test'
 import { createServer } from 'vite'
@@ -23,6 +25,16 @@ test(
     t.after(() => browser.close())
     const ownerSession = await browser.newContext({ baseURL, timezoneId: 'Pacific/Honolulu' })
     const guestSession = await browser.newContext({ baseURL, timezoneId: 'America/Los_Angeles' })
+    const artifactDir = process.env.CALENDAR_BROWSER_ARTIFACT_DIR
+    await using traces = new AsyncDisposableStack()
+    if (artifactDir) {
+      await mkdir(artifactDir, { recursive: true })
+      for (const [role, session] of Object.entries({ owner: ownerSession, guest: guestSession })) {
+        await session.tracing.start({ screenshots: true, snapshots: true })
+        // Flush each trace before closing Chromium, including on assertion failures.
+        traces.defer(() => session.tracing.stop({ path: join(artifactDir, `${role}-trace.zip`) }))
+      }
+    }
     const owner = await ownerSession.newPage()
     const guest = await guestSession.newPage()
     owner.setDefaultTimeout(10_000)

@@ -1,0 +1,25 @@
+name: PR review request
+run-name: 'Request review of PR #${{ github.event.number }}'
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions: {}
+
+concurrency:
+  group: review-request-${{ github.event.number }}
+  cancel-in-progress: true
+
+jobs:
+  request:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      ((github.event.pull_request.user.type == 'User' &&
+        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) ||
+       (github.event.pull_request.user.type == 'Bot' && github.event.pull_request.user.login == 'opencode-agent[bot]'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      # No checkout, artifacts or secrets cross into the default-branch reviewer.
+      - run: echo 'Review requested.'
