@@ -1,0 +1,41 @@
+name: Topic acceptance experiment
+on:
+  push:
+    branches: [codex/verify-topic-behavior]
+concurrency:
+  group: topic-acceptance-experiment
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: revision
+        run: |
+          read -r expectation sha < .github/proof/revision
+          [[ "$expectation" =~ ^(before|after)$ && "$sha" =~ ^[0-9a-f]{40}$ ]]
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "expectation=$expectation" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.revision.outputs.sha }}
+          path: app
+          persist-credentials: false
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+      - name: Exercise three HTTP scenarios on the selected revision
+        env:
+          EXPECTATION: ${{ steps.revision.outputs.expectation }}
+          REVISION: ${{ steps.revision.outputs.sha }}
+        run: |
+          actual=$(git -C app rev-parse HEAD)
+          test "$actual" = "$REVISION"
+          cp .github/proof/GuestTopicProofTest.java app/backend/src/test/java/io/hexlet/calendar/
+          cd app
+          status=0
+          mise exec -- sh -c 'cd backend && ./mvnw -B -q test -Dtest=GuestTopicProofTest' || status=$?
+          mise exec -- python3 ../.github/proof/check-result.py "$EXPECTATION" "$REVISION" "$status"
