@@ -39,3 +39,30 @@ jobs:
           status=0
           mise exec -- sh -c 'cd backend && ./mvnw -B -q test -Dtest=GuestTopicProofTest' || status=$?
           mise exec -- python3 ../.github/proof/check-result.py "$EXPECTATION" "$REVISION" "$status"
+      - name: Prepare exact-head Chromium regression check
+        if: steps.revision.outputs.expectation == 'after'
+        working-directory: app
+        run: |
+          mise exec -- pnpm install --frozen-lockfile
+          mise exec -- pnpm --filter frontend exec playwright install --with-deps --only-shell chromium
+      - name: Confirm that a visible empty topic row fails the browser test
+        if: steps.revision.outputs.expectation == 'after'
+        working-directory: app
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          page = Path("frontend/src/GuestBooking.tsx")
+          current = page.read_text()
+          correct = "{confirmed.guestTopic && <p>Тема разговора: {confirmed.guestTopic}</p>}"
+          assert current.count(correct) == 1
+          page.write_text(current.replace(correct, "<p>Тема разговора: {confirmed.guestTopic}</p>"))
+          PY
+          status=0
+          mise exec -- sh -ec 'cd backend && ./mvnw -B -q -Dtest=BookingBrowserTest test' > "$RUNNER_TEMP/empty-topic.log" 2>&1 || status=$?
+          python3 ../.github/proof/check-browser-regression.py . "$status"
+          git restore -- frontend/src/GuestBooking.tsx
+          git diff --exit-code
+      - name: Run the same browser command on the restored revision
+        if: steps.revision.outputs.expectation == 'after'
+        working-directory: app
+        run: mise exec -- sh -ec 'cd backend && ./mvnw -B -q -Dtest=BookingBrowserTest test'
