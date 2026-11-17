@@ -1,9 +1,13 @@
-import { Button, Stack, Text, TextInput } from '@mantine/core'
+import { Button, Stack, Text, Textarea, TextInput } from '@mantine/core'
 import { type FormEvent, useState } from 'react'
 
-import { type BookingInput, createBooking } from './api'
+import { type Booking, type BookingInput, createBooking } from './api'
 
-type GuestContact = Pick<BookingInput, 'guestName' | 'guestEmail'>
+export interface GuestContact {
+  guestName: string
+  guestEmail: string
+  guestTopic: string
+}
 
 const emailAtom = "[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+"
 const domainLabel = '[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?'
@@ -14,7 +18,7 @@ const emailPattern = new RegExp(
 interface BookingFormProps {
   typeId: string
   startsAt: string
-  onConfirmed: () => void
+  onConfirmed: (booking: Booking) => void
   contact: GuestContact
   onContactChange: (contact: GuestContact) => void
   onBack: (notice?: string) => void
@@ -29,7 +33,11 @@ export function BookingForm({
   onBack,
 }: BookingFormProps) {
   const [saving, setSaving] = useState(false)
-  const [errors, setErrors] = useState<{ guestName?: string; guestEmail?: string }>({})
+  const [errors, setErrors] = useState<{
+    guestName?: string
+    guestEmail?: string
+    guestTopic?: string
+  }>({})
   const [failed, setFailed] = useState(false)
 
   async function confirm(event: FormEvent<HTMLFormElement>) {
@@ -37,21 +45,29 @@ export function BookingForm({
     if (saving) return
     const guestName = contact.guestName.trim()
     const guestEmail = contact.guestEmail.trim()
+    const guestTopic = contact.guestTopic.trim()
     const nextErrors: typeof errors = {}
     if (!guestName || [...guestName].length > 100)
       nextErrors.guestName = 'Введите имя длиной от 1 до 100 символов'
     if ([...guestEmail].length > 254 || !emailPattern.test(guestEmail))
       nextErrors.guestEmail = 'Введите корректный email длиной до 254 символов'
+    if ([...guestTopic].length > 1000)
+      nextErrors.guestTopic = 'Тема разговора должна содержать до 1000 символов'
     setErrors(nextErrors)
     setFailed(false)
-    if (nextErrors.guestName || nextErrors.guestEmail) return
+    if (nextErrors.guestName || nextErrors.guestEmail || nextErrors.guestTopic) return
     setSaving(true)
-    const { data, error, response } = await createBooking({
-      body: { meetingTypeId: typeId, startsAt, guestName, guestEmail },
-    })
+    const body: BookingInput = {
+      meetingTypeId: typeId,
+      startsAt,
+      guestName,
+      guestEmail,
+      ...(guestTopic ? { guestTopic } : {}),
+    }
+    const { data, error, response } = await createBooking({ body })
     setSaving(false)
     if (response?.status === 201 && data) {
-      onConfirmed()
+      onConfirmed(data)
     } else if (response?.status === 409 && error?.code === 'SLOT_TAKEN') {
       onBack('Это время уже занято. Выберите другой слот')
     } else if (response?.status === 400 && error?.code === 'INVALID_START') {
@@ -59,7 +75,9 @@ export function BookingForm({
     } else if (
       response?.status === 400 &&
       error?.code === 'INVALID_INPUT' &&
-      (error.field === 'guestName' || error.field === 'guestEmail') &&
+      (error.field === 'guestName' ||
+        error.field === 'guestEmail' ||
+        error.field === 'guestTopic') &&
       typeof error.message === 'string' &&
       error.message.trim()
     ) {
@@ -98,6 +116,18 @@ export function BookingForm({
           autoComplete="email"
           error={errors.guestEmail}
           required
+        />
+        <Textarea
+          label="Тема разговора"
+          description="Список предстоящих событий открыт всем"
+          placeholder="О чём хотите поговорить?"
+          name="guestTopic"
+          value={contact.guestTopic}
+          disabled={saving}
+          onChange={(event) =>
+            onContactChange({ ...contact, guestTopic: event.currentTarget.value })
+          }
+          error={errors.guestTopic}
         />
         {failed && <Text role="alert">Не удалось подтвердить запись</Text>}
         <div className="form-actions">
