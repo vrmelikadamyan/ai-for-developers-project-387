@@ -136,13 +136,13 @@ class BookingHttpTest extends CalendarHttpTest {
           .isCreated()
           .expectBody()
           .jsonPath("$.guestTopic")
-          .doesNotExist();
+          .doesNotHaveJsonPath();
       book(http, type, "2026-11-11T07:00:00Z", "Ия", "iya@example.org", "   ")
           .expectStatus()
           .isCreated()
           .expectBody()
           .jsonPath("$.guestTopic")
-          .doesNotExist();
+          .doesNotHaveJsonPath();
       var explicitNull = bookingBody(type, "2026-11-11T07:30:00Z", "Пётр", "petr@example.org");
       explicitNull.put("guestTopic", null);
       post(http, explicitNull)
@@ -150,7 +150,7 @@ class BookingHttpTest extends CalendarHttpTest {
           .isCreated()
           .expectBody()
           .jsonPath("$.guestTopic")
-          .doesNotExist();
+          .doesNotHaveJsonPath();
       var upcoming = getList(http, UPCOMING);
       assertThat(upcoming).hasSize(4);
       assertThat(upcoming.getFirst()).isEqualTo(booking);
@@ -179,26 +179,58 @@ class BookingHttpTest extends CalendarHttpTest {
   }
 
   @Test
-  void existingBookingWithoutGuestTopicSurvivesSchemaMigration() throws Exception {
-    JsonNode booking;
+  void legacyBookingAndNewTopicSurviveSchemaMigration() throws Exception {
+    var topic = "Обсудить проект";
+    UUID type;
+    JsonNode legacy;
     try (var app = start()) {
       var http = http(app);
-      var type = publish(http, 30);
-      booking =
-          Objects.requireNonNull(
+      type = publish(http, 30);
+      legacy =
+          JSON.readTree(
               book(http, type, "2026-11-11T06:30:00Z", "Анна", "anna@example.org", null)
                   .expectStatus()
                   .isCreated()
-                  .expectBody(JsonNode.class)
+                  .expectBody()
+                  .jsonPath("$.guestTopic")
+                  .doesNotHaveJsonPath()
                   .returnResult()
                   .getResponseBody());
     }
-    try (var connection =
-        DriverManager.getConnection("jdbc:h2:file:" + directory.resolve("calendar"), "", "")) {
+    try (var connection = DriverManager.getConnection(jdbcUrl(), "", "")) {
       connection.createStatement().execute("ALTER TABLE bookings DROP COLUMN guest_topic");
     }
+    JsonNode topicBooking;
     try (var app = start()) {
-      assertThat(getList(http(app), UPCOMING)).containsExactly(booking);
+      var http = http(app);
+      var upcoming = getList(http, UPCOMING);
+      assertThat(upcoming).containsExactly(legacy);
+      assertThat(upcoming.getFirst().get("id")).isEqualTo(legacy.get("id"));
+      assertThat(upcoming.getFirst().has("guestTopic")).isFalse();
+      topicBooking =
+          JSON.readTree(
+              book(
+                      http,
+                      type,
+                      "2026-11-11T07:00:00Z",
+                      "Лев",
+                      "lev@example.org",
+                      "  " + topic + "  ")
+                  .expectStatus()
+                  .isCreated()
+                  .expectBody()
+                  .jsonPath("$.guestTopic")
+                  .isEqualTo(topic)
+                  .returnResult()
+                  .getResponseBody());
+    }
+    try (var app = start()) {
+      var upcoming = getList(http(app), UPCOMING);
+      assertThat(upcoming).containsExactly(legacy, topicBooking);
+      assertThat(upcoming.get(0).get("id")).isEqualTo(legacy.get("id"));
+      assertThat(upcoming.get(0).has("guestTopic")).isFalse();
+      assertThat(upcoming.get(1).get("id")).isEqualTo(topicBooking.get("id"));
+      assertThat(upcoming.get(1).get("guestTopic").asString()).isEqualTo(topic);
     }
   }
 
