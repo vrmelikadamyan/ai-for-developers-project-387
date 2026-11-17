@@ -17,6 +17,14 @@
 
 Термины описаны в [глоссарии](GLOSSARY.md), выбор публичного адреса для записи — в [архитектурном решении](docs/adr/0001-public-booking-entry.md). Новые задачи ведём в [трекере проекта 387](https://github.com/vrmelikadamyan/ai-for-developers-project-387/issues).
 
+## OpenCode в GitHub
+
+Начните новый комментарий в issue, обсуждении PR или у строки diff с `/oc` или `/opencode` и напишите запрос через пробел. Например, `/oc explain this issue` попросит агента объяснить задачу. Чтобы получить спецификацию по обсуждению, укажите скилл явно: `/oc запусти скилл to-spec по обсуждению этого issue`.
+
+[Workflow OpenCode](.github/workflows/opencode.yml) обрабатывает события `issue_comment` и `pull_request_review_comment` только при создании комментария. Команды доступны доверенным участникам с правом записи. Комментарии ботов и PR из форков пропускаются. Модель `deepseek/deepseek-flash` получает ключ из секрета Actions `DEEPSEEK_API_KEY`. OpenCode отвечает от имени GitHub App в том же обсуждении. Журнал выполнения доступен в [Actions → OpenCode](https://github.com/vrmelikadamyan/ai-for-developers-project-387/actions/workflows/opencode.yml).
+
+Публичная ссылка на сессию отключена (`share: false`; используемая версия OpenCode уже прекратила публикацию сессий). Для одного issue или PR одновременно выполняется один запрос, до 15 минут. Остановить текущий запуск можно через **Cancel workflow**, отключить новые — через **Disable workflow**.
+
 ## Docker и деплой
 
 Из корня репозитория соберите образ и запустите его на выбранном порту:
