@@ -22,7 +22,7 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-      issues: read
+      issues: write # gh publishes specs and tickets on a trusted /oc request
       pull-requests: read
       id-token: write
     concurrency:
