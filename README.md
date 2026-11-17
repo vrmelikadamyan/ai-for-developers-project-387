@@ -21,6 +21,8 @@
 
 Начните новый комментарий в issue, обсуждении PR или у строки diff с `/oc` или `/opencode` и напишите запрос через пробел. Например, `/oc explain this issue` попросит агента объяснить задачу. Чтобы получить спецификацию по обсуждению, укажите скилл явно: `/oc запусти скилл to-spec по обсуждению этого issue`.
 
+На чистом раннере агент прочитал файл трекера `docs/agents/issue-tracker.md` и скиллы `to-spec`, `to-tickets` и `implement-spec`. Ответ на `/oc explain this issue` открыт в [проверенном комментарии](https://github.com/vrmelikadamyan/ai-for-developers-project-387/issues/2#issuecomment-6952378959), а журнал — в [успешном прогоне](https://github.com/vrmelikadamyan/ai-for-developers-project-387/actions/runs/44113628037).
+
 [Workflow OpenCode](.github/workflows/opencode.yml) обрабатывает события `issue_comment` и `pull_request_review_comment` только при создании комментария. Команды доступны доверенным участникам с правом записи. Комментарии ботов и PR из форков пропускаются. Модель `deepseek/deepseek-flash` получает ключ из секрета Actions `DEEPSEEK_API_KEY`. OpenCode отвечает от имени GitHub App в том же обсуждении. Журнал выполнения доступен в [Actions → OpenCode](https://github.com/vrmelikadamyan/ai-for-developers-project-387/actions/workflows/opencode.yml).
 
 Публичная ссылка на сессию отключена (`share: false`; используемая версия OpenCode уже прекратила публикацию сессий). Для одного issue или PR одновременно выполняется один запрос, до 15 минут. Остановить текущий запуск можно через **Cancel workflow**, отключить новые — через **Disable workflow**.
