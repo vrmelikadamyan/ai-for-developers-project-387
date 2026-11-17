@@ -46,6 +46,8 @@ test(
     const guestName = 'Анна Ли'
     const guestEmail = `anna+${marker}@example.org`
     const guestTopic = 'Обсудить проект'
+    const secondGuestName = 'Борис Петров'
+    const secondGuestEmail = `boris+${marker}@example.org`
 
     await owner.goto('/')
     await owner.getByRole('link', { name: 'Типы встреч' }).click()
@@ -93,9 +95,23 @@ test(
     await expect(guest.getByRole('button', { name: '09:30–10:00 МСК · Занято' })).toBeDisabled()
     await expect(guest.getByRole('button', { name: '10:00–10:30 МСК · Свободно' })).toBeEnabled()
 
+    await guest.getByRole('button', { name: '10:00–10:30 МСК · Свободно' }).click()
+    await guest.getByRole('button', { name: 'Продолжить' }).click()
+    await guest.getByLabel('Имя').fill(secondGuestName)
+    await guest.getByLabel('Email').fill(secondGuestEmail)
+    await guest.getByRole('button', { name: 'Подтвердить запись' }).click()
+    await expect(
+      guest.getByRole('heading', { name: 'Бронь подтверждена. До встречи!' }),
+    ).toBeVisible()
+    await expect(guest.locator('.receipt').getByText(/Тема разговора:/)).toHaveCount(0)
+
     await owner.getByRole('link', { name: 'Предстоящие события' }).click()
-    const booking = owner.getByRole('listitem')
-    await expect(booking).toHaveCount(1)
+    const bookings = owner.getByRole('listitem')
+    await expect(bookings).toHaveCount(2)
+    const firstBooking = bookings.filter({ hasText: guestEmail })
+    const secondBooking = bookings.filter({ hasText: secondGuestEmail })
+    await expect(firstBooking).toHaveCount(1)
+    await expect(secondBooking).toHaveCount(1)
     for (const field of [
       meetingType,
       guestName,
@@ -104,7 +120,17 @@ test(
       '11 ноября, 09:30–10:00 МСК',
       'Дата создания: 10 ноября',
     ]) {
-      await expect(booking.getByText(field, { exact: true })).toBeVisible()
+      await expect(firstBooking.getByText(field, { exact: true })).toBeVisible()
     }
+    for (const field of [
+      meetingType,
+      secondGuestName,
+      secondGuestEmail,
+      '11 ноября, 10:00–10:30 МСК',
+      'Дата создания: 10 ноября',
+    ]) {
+      await expect(secondBooking.getByText(field, { exact: true })).toBeVisible()
+    }
+    await expect(secondBooking.getByText(/Тема разговора:/)).toHaveCount(0)
   },
 )
