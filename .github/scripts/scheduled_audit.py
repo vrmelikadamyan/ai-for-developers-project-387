@@ -237,8 +237,15 @@ def main():
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as output:
             output.write(f"{result}\n\n[Журнал #26]({os.environ['GITHUB_SERVER_URL']}/{repo}/issues/26)\n")
     elif command == "failure":
+        comments = [item for item in github.comments() if trusted_comment(item)]
+        summary_path = directory / "summary.json"
+        if summary_path.is_file():
+            summary = json.loads(summary_path.read_text())
+            report_marker = f"<!-- calendar-audit-report:{summary['fingerprint']} -->"
+            if any(report_marker in (item["body"] or "") for item in comments):
+                return
         failure_marker = f"<!-- calendar-audit-failure:{run_id} -->"
-        if not any(trusted_comment(item) and failure_marker in (item["body"] or "") for item in github.comments()):
+        if not any(failure_marker in (item["body"] or "") for item in comments):
             github.comment(f"{failure_marker}\n\nАудит недоступен или не завершён. "
                            f"[Прогон и сохранённые артефакты]({run_url}).\n\n"
                            "Данных для вывода о дефекте недостаточно. "

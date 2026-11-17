@@ -1,9 +1,10 @@
 import json
 from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from scheduled_audit import GitHub as GitHubClient, normalize, publish, read_decision
+from scheduled_audit import GitHub as GitHubClient, main, normalize, publish, read_decision
 
 
 class GitHub:
@@ -34,6 +35,37 @@ class GitHub:
 
 
 class ReportTest(unittest.TestCase):
+    def test_late_failure_does_not_overwrite_a_verified_published_report(self):
+        for summary_fingerprint, author, expected_failures in (
+                ("published", {"login": "github-actions[bot]", "type": "Bot"}, 0),
+                ("published", {"login": "visitor", "type": "User"}, 1),
+                ("unpublished", {"login": "github-actions[bot]", "type": "Bot"}, 1),
+                (None, {"login": "github-actions[bot]", "type": "Bot"}, 1)):
+            with self.subTest(summary=summary_fingerprint, author=author), TemporaryDirectory() as directory:
+                journal = [{"body": "<!-- calendar-audit-report:published -->", "user": author}]
+                failures = []
+                if summary_fingerprint:
+                    (Path(directory) / "summary.json").write_text(json.dumps({"fingerprint": summary_fingerprint}))
+
+                def receive_command(args, **kwargs):
+                    if args[1] == "api":
+                        return json.dumps([journal])
+                    self.assertEqual(args[:3], ["gh", "issue", "comment"])
+                    body = Path(args[args.index("--body-file") + 1]).read_text(encoding="utf-8")
+                    failures.append(body)
+                    journal.append({"body": body, "user": {"login": "github-actions[bot]", "type": "Bot"}})
+                    return ""
+
+                with patch.dict("os.environ", {"REPORT_DIR": directory, "GITHUB_REPOSITORY": "example/calendar",
+                                               "GITHUB_RUN_ID": "10", "GITHUB_SERVER_URL": "https://github.com"}), \
+                        patch("sys.argv", ["scheduled_audit.py", "failure"]), \
+                        patch("scheduled_audit.subprocess.check_output", side_effect=receive_command):
+                    main()
+                    main()
+                self.assertEqual(len(failures), expected_failures)
+                if failures:
+                    self.assertIn("<!-- calendar-audit-failure:10 -->", failures[0])
+
     def test_github_publishes_multiline_bodies_from_temporary_files(self):
         body = "Итог аудита\n\nLiteral shell text: $(echo unsafe) `echo unsafe`\n"
         for operation in ("issue", "comment"):
