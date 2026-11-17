@@ -3,21 +3,19 @@ import { useEffect, useRef, useState } from 'react'
 
 import { type Booking, type MeetingType, type Slot } from './api'
 import { BookingCalendar } from './BookingCalendar'
-import { BookingForm, type GuestContact } from './BookingForm'
+import { BookingForm, type GuestDetails } from './BookingForm'
 import { formatDay, formatSlot } from './bookingTime'
 import { MeetingTypeList } from './MeetingTypeList'
 
 const steps = ['Тип встречи', 'Дата и время', 'Контакты']
 
+const emptyDetails: GuestDetails = { guestName: '', guestEmail: '', guestTopic: '' }
+
 export function GuestBooking() {
   const [type, setType] = useState<MeetingType | null>(null)
   const [date, setDate] = useState<string | null>(null)
   const [slot, setSlot] = useState<Slot | null>(null)
-  const [contact, setContact] = useState<GuestContact>({
-    guestName: '',
-    guestEmail: '',
-    guestTopic: '',
-  })
+  const [contact, setContact] = useState<GuestDetails>(emptyDetails)
   const [notice, setNotice] = useState('')
   const [confirmed, setConfirmed] = useState<Booking | null>(null)
   const step = confirmed ? 3 : slot ? 2 : type ? 1 : 0
@@ -67,7 +65,7 @@ export function GuestBooking() {
               setDate(null)
               setSlot(null)
               setNotice('')
-              setContact({ guestName: '', guestEmail: '', guestTopic: '' })
+              setContact(emptyDetails)
             }}
           >
             Забронировать ещё

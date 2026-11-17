@@ -3,11 +3,13 @@ import { type FormEvent, useState } from 'react'
 
 import { type Booking, type BookingInput, createBooking } from './api'
 
-export interface GuestContact {
+export interface GuestDetails {
   guestName: string
   guestEmail: string
   guestTopic: string
 }
+
+type GuestFieldErrors = Partial<Record<keyof GuestDetails, string>>
 
 const emailAtom = "[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+"
 const domainLabel = '[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?'
@@ -19,8 +21,8 @@ interface BookingFormProps {
   typeId: string
   startsAt: string
   onConfirmed: (booking: Booking) => void
-  contact: GuestContact
-  onContactChange: (contact: GuestContact) => void
+  contact: GuestDetails
+  onContactChange: (contact: GuestDetails) => void
   onBack: (notice?: string) => void
 }
 
@@ -33,11 +35,7 @@ export function BookingForm({
   onBack,
 }: BookingFormProps) {
   const [saving, setSaving] = useState(false)
-  const [errors, setErrors] = useState<{
-    guestName?: string
-    guestEmail?: string
-    guestTopic?: string
-  }>({})
+  const [errors, setErrors] = useState<GuestFieldErrors>({})
   const [failed, setFailed] = useState(false)
 
   async function confirm(event: FormEvent<HTMLFormElement>) {
@@ -55,7 +53,7 @@ export function BookingForm({
       nextErrors.guestTopic = 'Тема разговора должна содержать до 1000 символов'
     setErrors(nextErrors)
     setFailed(false)
-    if (nextErrors.guestName || nextErrors.guestEmail || nextErrors.guestTopic) return
+    if (Object.keys(nextErrors).length > 0) return
     setSaving(true)
     const body: BookingInput = {
       meetingTypeId: typeId,
