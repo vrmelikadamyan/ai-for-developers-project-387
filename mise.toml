@@ -89,7 +89,7 @@ run = [
   "pnpm --filter frontend run lint",
   "pnpm --filter frontend run format:check",
   "cd backend && ./mvnw -B -q spotless:check",
-  "jactionlint .github/workflows/ci.yml .github/workflows/release-please.yml .github/workflows/opencode.yml .github/workflows/issue-triage.yml .github/workflows/pr-browser.yml .github/workflows/pr-review-request.yml .github/workflows/pr-review.yml",
+  "jactionlint .github/workflows/ci.yml .github/workflows/release-please.yml .github/workflows/opencode.yml .github/workflows/issue-triage.yml .github/workflows/pr-browser.yml .github/workflows/pr-review-request.yml .github/workflows/pr-review.yml .github/workflows/scheduled-audit.yml",
 ]
 
 [tasks.typecheck]
