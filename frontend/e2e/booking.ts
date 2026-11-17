@@ -45,6 +45,7 @@ test(
     const description = 'Короткий созвон, чтобы познакомиться'
     const guestName = 'Анна Ли'
     const guestEmail = `anna+${marker}@example.org`
+    const guestTopic = 'Обсудить проект'
 
     await owner.goto('/')
     await owner.getByRole('link', { name: 'Типы встреч' }).click()
@@ -77,10 +78,12 @@ test(
     await guest.getByRole('button', { name: 'Продолжить' }).click()
     await guest.getByLabel('Имя').fill(guestName)
     await guest.getByLabel('Email').fill(guestEmail)
+    await guest.getByLabel('Тема разговора').fill(`  ${guestTopic}  `)
     await guest.getByRole('button', { name: 'Подтвердить запись' }).click()
     await expect(
       guest.getByRole('heading', { name: 'Бронь подтверждена. До встречи!' }),
     ).toBeVisible()
+    await expect(guest.getByText(`Тема разговора: ${guestTopic}`, { exact: true })).toBeVisible()
 
     await guest.getByRole('button', { name: 'Забронировать ещё' }).click()
     await chooseType.click()
@@ -97,6 +100,7 @@ test(
       meetingType,
       guestName,
       guestEmail,
+      `Тема разговора: ${guestTopic}`,
       '11 ноября, 09:30–10:00 МСК',
       'Дата создания: 10 ноября',
     ]) {
