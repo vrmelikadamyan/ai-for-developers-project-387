@@ -57,3 +57,32 @@ class ReviewerTrust(unittest.TestCase):
                                  data.__getitem__)
         self.assertEqual(packet["linked_comments"], [])
         self.assertEqual(packet["unavailable"], [wrong])
+
+    def test_browser_evidence_belongs_to_this_pr_when_two_prs_share_a_head(self):
+        from unittest.mock import patch
+        from pr_review import ci_snapshot
+
+        def run(name, event, number, suite_id, conclusion):
+            return {"name": name, "event": event, "path": f".github/workflows/{name}.yml",
+                    "pull_requests": [{"number": number}] if number else [], "check_suite_id": suite_id,
+                    "status": "completed", "conclusion": conclusion, "html_url": f"run/{suite_id}"}
+
+        other = run("pr-browser", "pull_request", 19, 30, "success")
+        current = run("pr-browser", "pull_request", 18, 29, "failure")
+        push = run("ci", "push", None, 28, "success")
+        unassociated = run("pr-browser", "pull_request", None, 31, "success")
+        sha = "a" * 40
+        data = {
+            f"actions/runs?head_sha={sha}&per_page=100": {"workflow_runs": [unassociated, other, current, push]},
+            f"commits/{sha}/check-runs?per_page=100": {"check_runs": [
+                {"name": r["name"], "app": {"slug": "github-actions"}, "pull_requests": [],
+                 "check_suite": {"id": r["check_suite_id"]}, "html_url": r["html_url"],
+                 "status": r["status"], "conclusion": r["conclusion"]} for r in (unassociated, other, current, push)]},
+            f"commits/{sha}/status?per_page=100": {"statuses": []},
+        }
+        with patch("pr_review.api", side_effect=lambda repo, path: data[path]):
+            snapshot = ci_snapshot("example/calendar", sha, 18)
+        for kind in ("workflows", "check_runs"):
+            with self.subTest(kind=kind):
+                self.assertEqual([(r["html_url"], r["conclusion"]) for r in snapshot[kind]],
+                                 [("run/29", "failure"), ("run/28", "success")])

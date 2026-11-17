@@ -94,27 +94,44 @@ def api(repo, path, *, pages=False, diff=False, optional=False):
     return [item for page in data for item in page] if pages else data
 
 
-def ci_snapshot(repo, sha):
+def ci_snapshot(repo, sha, number):
+    def linked_to_pr(item):
+        return any(pr["number"] == number for pr in item["pull_requests"])
+
     # The CI push run can predate the PR; its browser run starts when the PR opens.
     # Include both once complete, or label missing/pending evidence after six minutes.
-    expected = {".github/workflows/ci.yml", ".github/workflows/pr-browser.yml"}
+    expected = {".github/workflows/ci.yml": "push", ".github/workflows/pr-browser.yml": "pull_request"}
     deadline = time.monotonic() + 360
     while True:
         runs = api(repo, f"actions/runs?head_sha={sha}&per_page=100")["workflow_runs"]
         latest = {}
         for run in runs:
-            latest.setdefault(run["path"], run)  # newest first
+            path, event = run["path"], run["event"]
+            if path in expected and event != expected[path]:
+                continue
+            if event.startswith("pull_request") and not linked_to_pr(run):
+                continue
+            latest.setdefault(path, run)  # newest first
         if all(latest.get(path, {}).get("status") == "completed" for path in expected):
             break
         if time.monotonic() >= deadline:
             break
         time.sleep(15)
+    suites = {run["check_suite_id"] for run in latest.values()}
+    checks = api(repo, f"commits/{sha}/check-runs?per_page=100")["check_runs"]
+
+    def relevant(check):
+        # Actions job checks also share the commit SHA across PRs. Match their workflow run.
+        if (check.get("app") or {}).get("slug") == "github-actions":
+            return check["check_suite"]["id"] in suites
+        return not check["pull_requests"] or linked_to_pr(check)
+
     return {
-        "missing_workflows": sorted(expected - latest.keys()),
+        "missing_workflows": sorted(expected.keys() - latest.keys()),
         "workflows": [{key: run[key] for key in ("name", "status", "conclusion", "html_url")}
                       for run in latest.values()],
         "check_runs": [{key: check[key] for key in ("name", "status", "conclusion", "html_url")}
-                       for check in api(repo, f"commits/{sha}/check-runs?per_page=100")["check_runs"]],
+                       for check in checks if relevant(check)],
         "statuses": [{key: item[key] for key in ("context", "state", "target_url")}
                      for item in api(repo, f"commits/{sha}/status?per_page=100")["statuses"]],
     }
@@ -134,7 +151,7 @@ def collect(repo, number, sha, base, pr):
         "reviews": history(f"pulls/{number}/reviews", ["state", "commit_id"]),
         "inline_comments": history(f"pulls/{number}/comments", ["path", "line", "commit_id"]),
         "diff": clipped(api(repo, f"compare/{base}...{sha}", diff=True), 120000),
-        "ci_for_head": ci_snapshot(repo, sha),
+        "ci_for_head": ci_snapshot(repo, sha, int(number)),
     }
 
 
